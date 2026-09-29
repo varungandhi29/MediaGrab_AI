@@ -33,6 +33,14 @@ def get_sandboxed_environment() -> Dict[str, str]:
         if key.upper() in safe_keys:
             clean_env[key] = value
 
+    # Ensure Node.js and ffmpeg dirs are present on PATH for yt-dlp JS runtime and muxing
+    extra_paths = [r"C:\Program Files\nodejs", r"D:\ffmpeg\bin", r"C:\ffmpeg\bin"]
+    curr_path = clean_env.get("PATH", "")
+    for p in extra_paths:
+        if os.path.exists(p) and p not in curr_path:
+            curr_path = f"{p};{curr_path}"
+    clean_env["PATH"] = curr_path
+
     # Force UTF-8 and no Python buffering
     clean_env["PYTHONUTF8"] = "1"
     clean_env["PYTHONUNBUFFERED"] = "1"
@@ -75,6 +83,12 @@ def build_sandboxed_ytdlp_args(
     # Add ffmpeg location if available
     if settings.FFMPEG_LOCATION and os.path.exists(settings.FFMPEG_LOCATION):
         args.extend(["--ffmpeg-location", settings.FFMPEG_LOCATION])
+
+    # Pass Node.js as JS runtime if present (critical for modern YouTube signature decryption)
+    import shutil
+    node_exe = shutil.which("node") or r"C:\Program Files\nodejs\node.exe"
+    if os.path.exists(node_exe):
+        args.extend(["--js-runtimes", f"node:{node_exe}"])
 
     if is_metadata_only:
         args.extend([

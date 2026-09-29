@@ -96,20 +96,46 @@ class HeadlessBrowserService:
 
                     media_found_event = asyncio.Event()
 
+                    def is_media_url(u: str, ctype: str = "") -> bool:
+                        u_low = u.lower()
+                        # Reject HTML, embed, subtitle, and UI sound URLs
+                        if any(k in u_low for k in ["subtitle", ".srt", ".vtt", "subrip"]):
+                            return False
+                        if any(k in u_low for k in ["player.vimeo.com/video", "youtube.com/embed", "/embed/", "/iframe", ".html", ".htm"]):
+                            return False
+                        if any(k in u_low for k in ["/audio/failure", "failure.mp3", "click.mp3", "beep.mp3", "notification", "bell.mp3", "ding.mp3"]):
+                            return False
+                        if ctype and "text/html" in ctype:
+                            return False
+
+                        if bool(MEDIA_EXT_PATTERN.search(u_low)):
+                            return True
+                        if "googlevideo.com/videoplayback" in u_low:
+                            return True
+                        if "vimeocdn.com" in u_low and (".mp4" in u_low or ".m3u8" in u_low or "playlist" in u_low):
+                            return True
+                        if any(k in u_low for k in [".m3u8", ".mp4", ".webm", ".m4a", ".mp3", "playlist.m3u8", "master.m3u8"]):
+                            return True
+                        if ctype and any(ctype.startswith(p) for p in ["video/", "audio/", "application/x-mpegurl", "application/vnd.apple.mpegurl"]):
+                            return True
+                        return False
+
+                    # Sniff requests
+                    async def handle_request(request: PlaywrightRequest):
+                        req_url = request.url
+                        if is_media_url(req_url):
+                            valid_cand, clean_cand, _ = validate_url_ssrf(req_url)
+                            if valid_cand and clean_cand not in discovered_media_urls:
+                                discovered_media_urls.append(clean_cand)
+                                media_found_event.set()
+
+                    page.on("request", handle_request)
+
                     # NETWORK RESPONSE INTERCEPTION: Sniff media streaming responses
                     async def handle_response(response: PlaywrightResponse):
                         resp_url = response.url
-                        headers = response.headers
-                        content_type = headers.get("content-type", "").lower()
-                        is_media_signature = bool(MEDIA_EXT_PATTERN.search(resp_url))
-                        is_media_mime = any(
-                            content_type.startswith(prefix)
-                            for prefix in ["video/", "audio/", "application/x-mpegurl", "application/vnd.apple.mpegurl"]
-                        ) or ("share/streaming" in resp_url and "type=M3U8" in resp_url)
-                        is_subtitle = any(s in resp_url.lower() for s in ["subtitle", ".srt", ".vtt", "subrip"]) or "subtitle" in content_type
-
-                        if (is_media_signature or is_media_mime) and not is_subtitle:
-                            # Re-verify candidate URL before storing
+                        content_type = response.headers.get("content-type", "").lower()
+                        if is_media_url(resp_url, content_type):
                             valid_cand, clean_cand, _ = validate_url_ssrf(resp_url)
                             if valid_cand and clean_cand not in discovered_media_urls:
                                 discovered_media_urls.append(clean_cand)
@@ -144,8 +170,8 @@ class HeadlessBrowserService:
                                 const urls = [];
                                 let dur = null;
                                 document.querySelectorAll('video').forEach(v => {
-                                    if (v.src) urls.push(v.src);
-                                    if (v.currentSrc) urls.push(v.currentSrc);
+                                    if (v.src && !v.src.startsWith('blob:')) urls.push(v.src);
+                                    if (v.currentSrc && !v.currentSrc.startsWith('blob:')) urls.push(v.currentSrc);
                                     if (v.duration && !isNaN(v.duration) && isFinite(v.duration) && v.duration > 0 && !dur) {
                                         dur = v.duration;
                                     }
@@ -154,7 +180,12 @@ class HeadlessBrowserService:
                                     if (s.src) urls.push(s.src);
                                 });
                                 const og = document.querySelector('meta[property="og:video"], meta[property="og:video:url"], meta[name="twitter:player:stream"]');
-                                if (og && og.content) urls.push(og.content);
+                                if (og && og.content) {
+                                    const c = og.content.toLowerCase();
+                                    if (!c.includes('/embed/') && !c.includes('/video/') && !c.includes('.html')) {
+                                        urls.push(og.content);
+                                    }
+                                }
                                 const ogThumb = document.querySelector('meta[property="og:image"]');
                                 const thumb = ogThumb ? ogThumb.content : null;
                                 return { urls, thumb, duration: dur };
@@ -163,7 +194,7 @@ class HeadlessBrowserService:
 
                         if dom_video_sources:
                             for raw_src in dom_video_sources.get("urls", []):
-                                if raw_src:
+                                if raw_src and is_media_url(raw_src):
                                     full_src = urllib.parse.urljoin(safe_url, raw_src)
                                     val, clean_val, _ = validate_url_ssrf(full_src)
                                     if val and clean_val not in discovered_media_urls:

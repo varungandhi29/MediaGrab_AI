@@ -441,7 +441,11 @@ const VideoPlayerModal = forwardRef(function VideoPlayerModal(
       hls.attachMedia(v);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsBuffering(false);
-        if (hasStartedPlaying && pendingSeekTimeRef.current !== null && pendingSeekTimeRef.current > 0) {
+        const curTime = (v.currentTime && v.currentTime > 0) ? v.currentTime : 0;
+        if (hasStartedPlaying && curTime > 0) {
+          v.currentTime = curTime;
+          setCurrentTime(curTime);
+        } else if (pendingSeekTimeRef.current !== null && pendingSeekTimeRef.current > 0) {
           v.currentTime = pendingSeekTimeRef.current;
           setCurrentTime(pendingSeekTimeRef.current);
           pendingSeekTimeRef.current = null;
@@ -480,8 +484,7 @@ const VideoPlayerModal = forwardRef(function VideoPlayerModal(
       });
       hls.on(Hls.Events.LEVEL_LOADED, (_, data) => {
         if (data.details && data.details.totalduration > 0) {
-          maxPlayableDurationRef.current = data.details.totalduration;
-          if (data.details.live === false && (!duration || duration <= 0)) {
+          if (!metadata?.duration_seconds || metadata.duration_seconds <= 0) {
             setDuration(data.details.totalduration);
           }
         }
@@ -493,14 +496,6 @@ const VideoPlayerModal = forwardRef(function VideoPlayerModal(
           data.details === Hls.ErrorDetails.BUFFER_NUDGE_ON_STALL
         ) {
           hls.recoverMediaError();
-          const el = videoRef.current;
-          if (el && el.buffered.length > 0) {
-            const maxBuf = el.buffered.end(el.buffered.length - 1);
-            if (el.currentTime > maxBuf) {
-              el.currentTime = Math.max(0, maxBuf - 0.5);
-              setCurrentTime(el.currentTime);
-            }
-          }
           if (bufferingTimerRef.current) {
             clearTimeout(bufferingTimerRef.current);
             bufferingTimerRef.current = null;
@@ -571,19 +566,24 @@ const VideoPlayerModal = forwardRef(function VideoPlayerModal(
 
       const isSrcChanged = v.src !== streamSrc && !v.src.endsWith(streamSrc);
       if (isSrcChanged) {
+        const curTime = (v.currentTime && v.currentTime > 0) ? v.currentTime : 0;
         v.src = streamSrc;
-      }
-
-      if (hasStartedPlaying && pendingSeekTimeRef.current !== null && pendingSeekTimeRef.current > 0) {
-        v.currentTime = pendingSeekTimeRef.current;
-        setCurrentTime(pendingSeekTimeRef.current);
-        if (a && needsSeparateAudio) a.currentTime = pendingSeekTimeRef.current;
-        pendingSeekTimeRef.current = null;
-      } else if (!hasStartedPlaying) {
-        v.currentTime = 0;
-        setCurrentTime(0);
-        if (a && needsSeparateAudio) a.currentTime = 0;
-        pendingSeekTimeRef.current = null;
+        if (hasStartedPlaying && curTime > 0) {
+          // Seamless handoff: preserve current timestamp when src updates (e.g. background prep ready)
+          v.currentTime = curTime;
+          setCurrentTime(curTime);
+          if (a && needsSeparateAudio) a.currentTime = curTime;
+        } else if (pendingSeekTimeRef.current !== null && pendingSeekTimeRef.current > 0) {
+          v.currentTime = pendingSeekTimeRef.current;
+          setCurrentTime(pendingSeekTimeRef.current);
+          if (a && needsSeparateAudio) a.currentTime = pendingSeekTimeRef.current;
+          pendingSeekTimeRef.current = null;
+        } else {
+          v.currentTime = 0;
+          setCurrentTime(0);
+          if (a && needsSeparateAudio) a.currentTime = 0;
+          pendingSeekTimeRef.current = null;
+        }
       }
 
       v.muted = false;
@@ -657,14 +657,12 @@ const VideoPlayerModal = forwardRef(function VideoPlayerModal(
         v.muted = false;
         v.volume = 1;
         v.playsInline = true;
-        if (!hasStartedPlaying) {
-          try {
-            v.currentTime = 0;
-            if (a) a.currentTime = 0;
-            setCurrentTime(0);
-            pendingSeekTimeRef.current = null;
-          } catch (e) {}
-        }
+        try {
+          v.currentTime = 0;
+          if (a) a.currentTime = 0;
+          setCurrentTime(0);
+          pendingSeekTimeRef.current = null;
+        } catch (e) {}
         if (v.readyState >= 2) {
           v.play()
             .then(() => {
@@ -765,18 +763,8 @@ const VideoPlayerModal = forwardRef(function VideoPlayerModal(
 
       handleUserActivity();
 
-      // Check preview limit for provider-restricted HLS streams
-      let bounded = Math.max(0, targetTime);
-      if (maxPlayableDurationRef.current && isHlsStream) {
-        if (bounded > maxPlayableDurationRef.current) {
-          bounded = Math.max(0, maxPlayableDurationRef.current - 0.5);
-          setSeekFeedback(`Preview limit: ${formatTime(maxPlayableDurationRef.current)}`);
-          setTimeout(() => setSeekFeedback(null), 2000);
-        }
-      }
-
       const fullDur = Math.max(metadata?.duration_seconds || 0, v.duration || 0, duration || 0, 1000);
-      bounded = Math.min(fullDur, bounded);
+      const bounded = Math.max(0, Math.min(fullDur, targetTime));
 
       const wasPlaying = !v.paused || isPlaying;
       wasPlayingRef.current = wasPlaying;
@@ -951,7 +939,7 @@ const VideoPlayerModal = forwardRef(function VideoPlayerModal(
       if (fullDur > 0 && !isNaN(fullDur)) {
         setDuration(fullDur);
       }
-      if (hasStartedPlaying && pendingSeekTimeRef.current !== null && pendingSeekTimeRef.current > 0) {
+      if (pendingSeekTimeRef.current !== null && pendingSeekTimeRef.current > 0) {
         v.currentTime = pendingSeekTimeRef.current;
         setCurrentTime(pendingSeekTimeRef.current);
         if (a && needsSeparateAudio) a.currentTime = pendingSeekTimeRef.current;
@@ -962,7 +950,7 @@ const VideoPlayerModal = forwardRef(function VideoPlayerModal(
             if (a && needsSeparateAudio) a.play().catch(() => {});
           }).catch(() => {});
         }
-      } else if (!hasStartedPlaying) {
+      } else {
         v.currentTime = 0;
         setCurrentTime(0);
         if (a && needsSeparateAudio) a.currentTime = 0;
@@ -979,7 +967,7 @@ const VideoPlayerModal = forwardRef(function VideoPlayerModal(
     setIsBuffering(false);
     const v = videoRef.current;
     const a = audioRef.current;
-    if (v && hasStartedPlaying && pendingSeekTimeRef.current !== null && pendingSeekTimeRef.current > 0) {
+    if (v && pendingSeekTimeRef.current !== null && pendingSeekTimeRef.current > 0) {
       v.currentTime = pendingSeekTimeRef.current;
       setCurrentTime(pendingSeekTimeRef.current);
       if (a && needsSeparateAudio) a.currentTime = pendingSeekTimeRef.current;

@@ -333,6 +333,31 @@ async def serve_media_download(token: str, request: Request):
     )
 
 
+def _rewrite_m3u8(manifest_text: str, base_url: str, token: str) -> str:
+    import urllib.parse
+    import re
+
+    def _rewrite_url(raw_url: str) -> str:
+        abs_url = urllib.parse.urljoin(base_url, raw_url.strip())
+        quoted = urllib.parse.quote(abs_url, safe="")
+        return f"/api/stream/{token}/hls/segment?u={quoted}"
+
+    lines = []
+    uri_pattern = re.compile(r'URI="([^"]+)"')
+    for line in manifest_text.splitlines():
+        line_str = line.strip()
+        if not line_str:
+            lines.append(line)
+            continue
+        if line_str.startswith("#"):
+            if 'URI="' in line_str:
+                line_str = uri_pattern.sub(lambda m: f'URI="{_rewrite_url(m.group(1))}"', line_str)
+            lines.append(line_str)
+        else:
+            lines.append(_rewrite_url(line_str))
+    return "\n".join(lines)
+
+
 @router.get("/api/stream/{token}/hls")
 async def serve_hls_manifest_compat(token: str, request: Request):
     """
@@ -353,19 +378,14 @@ async def serve_hls_manifest_compat(token: str, request: Request):
             manifest_text = raw_bytes
         else:
             manifest_text = raw_bytes.decode("utf-8", errors="replace")
-        lines = []
-        for line in manifest_text.splitlines():
-            line_str = line.strip()
-            if line_str and not line_str.startswith("#"):
-                lines.append(f"/api/stream/{token}/hls/segment?u={line_str}")
-            else:
-                lines.append(line_str)
-
-        rewritten = "\n".join(lines)
+        rewritten = _rewrite_m3u8(manifest_text, target["target_url"], token)
         return Response(
             content=rewritten,
             media_type="application/vnd.apple.mpegurl",
-            headers=_build_cors_headers(),
+            headers=_build_cors_headers({
+                "content-type": "application/vnd.apple.mpegurl",
+                "cache-control": "no-cache",
+            }),
         )
     finally:
         await client.aclose()
@@ -375,7 +395,7 @@ async def serve_hls_manifest_compat(token: str, request: Request):
 @router.head("/api/stream/{token}/hls/segment")
 async def serve_hls_segment(token: str, u: str, request: Request):
     """
-    Proxies HLS media segments (.ts) with full CORS headers so browsers and Hls.js
+    Proxies HLS media segments (.ts, .m4s) and child sub-playlists (.m3u8) with full CORS headers so browsers and Hls.js
     can fetch chunks without third-party CDN CORS restrictions.
     Strictly SSRF-validated.
     """
@@ -390,10 +410,29 @@ async def serve_hls_segment(token: str, u: str, request: Request):
     if req_range:
         upstream_headers["Range"] = req_range
 
-    client = httpx.AsyncClient(timeout=20.0)
+    client = httpx.AsyncClient(timeout=httpx.Timeout(connect=15.0, read=None, write=30.0, pool=60.0))
     try:
         upstream_req = client.build_request("GET", clean_url, headers=upstream_headers)
         upstream_resp = await client.send(upstream_req, stream=True)
+
+        mime_type = upstream_resp.headers.get("content-type", "video/mp2t")
+        # Check if upstream response is actually another m3u8 playlist (e.g. sub-playlist)
+        if "mpegurl" in mime_type or clean_url.endswith(".m3u8") or "m3u8" in clean_url:
+            raw_bytes = await upstream_resp.aread() if hasattr(upstream_resp, "aread") and callable(upstream_resp.aread) else (
+                upstream_resp.content if hasattr(upstream_resp, "content") else b""
+            )
+            text = raw_bytes.decode("utf-8", errors="replace") if isinstance(raw_bytes, bytes) else str(raw_bytes)
+            if "#EXTM3U" in text:
+                rewritten = _rewrite_m3u8(text, clean_url, token)
+                await client.aclose()
+                return Response(
+                    content=rewritten,
+                    media_type="application/vnd.apple.mpegurl",
+                    headers=_build_cors_headers({
+                        "content-type": "application/vnd.apple.mpegurl",
+                        "cache-control": "no-cache",
+                    }),
+                )
 
         resp_headers = _build_cors_headers({
             "content-type": upstream_resp.headers.get("content-type", "video/mp2t"),
@@ -519,18 +558,7 @@ async def serve_stream_with_quality(
             manifest_text = raw_bytes if isinstance(raw_bytes, str) else raw_bytes.decode("utf-8", errors="replace")
 
             if "#EXTM3U" in manifest_text or "EXTINF" in manifest_text:
-                import urllib.parse
-                lines = []
-                for line in manifest_text.splitlines():
-                    line_str = line.strip()
-                    if line_str and not line_str.startswith("#"):
-                        abs_seg_url = urllib.parse.urljoin(target_url, line_str)
-                        quoted_url = urllib.parse.quote(abs_seg_url, safe="")
-                        lines.append(f"/api/stream/{token}/hls/segment?u={quoted_url}")
-                    else:
-                        lines.append(line_str)
-
-                rewritten = "\n".join(lines)
+                rewritten = _rewrite_m3u8(manifest_text, target_url, token)
                 return Response(
                     content=rewritten,
                     media_type="application/vnd.apple.mpegurl",
@@ -551,7 +579,7 @@ async def serve_stream_with_quality(
     if req_range:
         headers["Range"] = req_range
 
-    client = httpx.AsyncClient(timeout=15.0)
+    client = httpx.AsyncClient(timeout=httpx.Timeout(connect=15.0, read=None, write=30.0, pool=60.0))
     try:
         upstream_req = client.build_request("GET", target_url, headers=headers)
         upstream_resp = await client.send(upstream_req, stream=True)
@@ -569,7 +597,13 @@ async def serve_stream_with_quality(
                 headers=_build_cors_headers(),
             )
 
-        mime_type = upstream_resp.headers.get("content-type")
+        mime_type = upstream_resp.headers.get("content-type") or ""
+        # If upstream accidentally responded with an HTML error page, do not stream as video
+        if "text/html" in mime_type:
+            await upstream_resp.aclose()
+            await client.aclose()
+            raise HTTPException(status_code=502, detail="Upstream returned HTML instead of a media stream.")
+
         if not mime_type or mime_type == "application/octet-stream":
             mime_type = target.get("mime") or ("audio/mp4" if quality_label == "audio" else "video/mp4")
         elif quality_label == "audio" and "video" in mime_type:
