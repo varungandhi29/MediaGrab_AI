@@ -1,0 +1,26 @@
+# Node & Frontend
+node_modules/
+dist/
+.DS_Store
+
+# Python & Backend
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.log
+
+# Ephemeral storage
+backend/storage/downloads/*
+!backend/storage/downloads/.gitkeep
+backend/storage/downloads/.*
+
+# Binaries & Tunnels
+cloudflared.exe
+*.exe
+
+# Temp & Scratch
+scratch/
+.system_generated/
+.env

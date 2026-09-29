@@ -18,7 +18,7 @@ async def test_fast_fail_all_tiers_specific_error():
         await media_extractor.extract_metadata(test_url)
 
     err_msg = str(excinfo.value)
-    expected_substring = "This site uses protections we can't bypass (dynamic tokens, anti-bot measures, or requires login)"
+    expected_substring = "This looks like a file-sharing page, not a video platform. It can't be played or downloaded here. Open the page and use its own download button, or paste a direct video link (.mp4 / .m3u8) or a supported site link."
     assert expected_substring in err_msg, f"Expected specific error message, got: {err_msg}"
 
 

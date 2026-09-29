@@ -1,8 +1,11 @@
 import ipaddress
 import socket
 from urllib.parse import urlparse
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, AsyncIterator, Dict, Any
+from contextlib import asynccontextmanager
 import httpx
+import httpcore
+import httpcore._backends.auto
 from ..config import settings
 
 
@@ -181,6 +184,85 @@ def validate_url_ssrf(url: str) -> Tuple[bool, str, Optional[str]]:
     return True, url, None
 
 
+class PinnedNetworkBackend(httpcore.AsyncNetworkBackend):
+    """
+    Pins connections to validated IP addresses to prevent DNS rebinding attacks.
+    Preserves TLS SNI and HTTP Host header for valid SSL certificate validation.
+    """
+    def __init__(self, ip_map: Dict[str, str]):
+        self._backend = httpcore._backends.auto.AutoBackend()
+        self._ip_map = ip_map
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: Optional[float] = None,
+        local_address: Optional[str] = None,
+        socket_options: Any = None,
+    ) -> httpcore.AsyncNetworkStream:
+        target_ip = self._ip_map.get(host, host)
+        return await self._backend.connect_tcp(
+            host=target_ip,
+            port=port,
+            timeout=timeout,
+            local_address=local_address,
+            socket_options=socket_options,
+        )
+
+    async def connect_unix_socket(self, *args, **kwargs):
+        return await self._backend.connect_unix_socket(*args, **kwargs)
+
+    async def sleep(self, seconds: float):
+        await self._backend.sleep(seconds)
+
+
+def _dual_async_context_manager(func):
+    """
+    Decorator that allows safe_http_request to be used both as an async context manager:
+        async with safe_http_request(...) as resp:
+    and awaited directly:
+        resp = await safe_http_request(...)
+    Enforces max_bytes on the awaited path, raising an error if the body exceeds the limit.
+    """
+    cm_func = asynccontextmanager(func)
+
+    class DualAsyncContextManager:
+        def __init__(self, *args, **kwargs):
+            self._args = args
+            self._kwargs = kwargs
+            self._max_bytes = kwargs.get("max_bytes", 2 * 1024 * 1024)
+            if len(args) >= 6:
+                self._max_bytes = args[5]
+            self._cm = cm_func(*args, **kwargs)
+
+        async def __aenter__(self):
+            return await self._cm.__aenter__()
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            return await self._cm.__aexit__(exc_type, exc_val, exc_tb)
+
+        def __await__(self):
+            async def _await_helper():
+                async with self._cm as res:
+                    # Enforce max_bytes on Content-Length header if present
+                    cl = res.headers.get("content-length")
+                    if cl and cl.isdigit() and int(cl) > self._max_bytes:
+                        raise ValueError(f"Response body exceeded maximum allowed size of {self._max_bytes} bytes (Content-Length: {cl})")
+
+                    if hasattr(res, "content") and len(res.content) > self._max_bytes:
+                        raise ValueError(f"Response body exceeded maximum allowed size of {self._max_bytes} bytes")
+
+                    return res
+            return _await_helper().__await__()
+
+    def wrapper(*args, **kwargs):
+        return DualAsyncContextManager(*args, **kwargs)
+
+    return wrapper
+
+
+@_dual_async_context_manager
 async def safe_http_request(
     method: str,
     url: str,
@@ -188,13 +270,17 @@ async def safe_http_request(
     max_redirects: int = 5,
     timeout: float = 15.0,
     max_bytes: int = 2 * 1024 * 1024,  # 2MB max response for inspection
-) -> httpx.Response:
+) -> AsyncIterator[httpx.Response]:
     """
     Performs an HTTP request with strict step-by-step redirect inspection to prevent
     DNS rebinding and SSRF via HTTP 3xx redirects to internal addresses.
+    Pins the validated IP for the actual connection so DNS rebinding can't bypass SSRF checks.
+    Decorated with asynccontextmanager to support `async with safe_http_request(...) as resp:`
+    as well as direct `await safe_http_request(...)`.
     """
     current_url = url
     redirect_count = 0
+    ip_map: Dict[str, str] = {}
 
     default_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -203,17 +289,33 @@ async def safe_http_request(
     if headers:
         default_headers.update(headers)
 
-    # Use transport that enforces timeouts and limits
-    async with httpx.AsyncClient(
+    backend = PinnedNetworkBackend(ip_map)
+    pool = httpcore.AsyncConnectionPool(network_backend=backend)
+    transport = httpx.AsyncHTTPTransport(verify=True)
+    transport._pool = pool
+
+    client = httpx.AsyncClient(
+        transport=transport,
         follow_redirects=False,
         timeout=httpx.Timeout(timeout),
-        verify=True,
-    ) as client:
+    )
+    try:
         while True:
             # Re-validate target URL on every hop
             is_valid, _, error_msg = validate_url_ssrf(current_url)
             if not is_valid:
                 raise SSRFValidationError(f"Redirect blocked by SSRF defense: {error_msg}")
+
+            # Pin the validated IP for the actual connection (neutralizes DNS rebinding)
+            parsed_current = urlparse(current_url)
+            host_current = parsed_current.hostname or ""
+            try:
+                ip_obj = ipaddress.ip_address(host_current)
+                ip_map[host_current] = str(ip_obj)
+            except ValueError:
+                resolved_ips = resolve_hostname_ips(host_current)
+                if resolved_ips:
+                    ip_map[host_current] = str(resolved_ips[0])
 
             response = await client.request(
                 method=method,
@@ -234,7 +336,45 @@ async def safe_http_request(
                 # Resolve relative redirects
                 next_url = str(response.url.join(location))
                 current_url = next_url
-                # Continue loop to next hop with SSRF validation
+                # Continue loop to next hop with SSRF validation and IP pinning
                 continue
 
-            return response
+            try:
+                yield response
+            finally:
+                await response.aclose()
+            return
+    finally:
+        await client.aclose()
+
+
+def create_safe_client(url: str, timeout: float = 60.0) -> httpx.AsyncClient:
+    """
+    Creates an httpx.AsyncClient configured with SSRF protection, DNS rebinding
+    pinning, and redirect security.
+    """
+    is_valid, clean_url, error_msg = validate_url_ssrf(url)
+    if not is_valid:
+        raise SSRFValidationError(f"SSRF validation blocked: {error_msg}")
+
+    parsed = urlparse(clean_url)
+    host = parsed.hostname or ""
+    ip_map: Dict[str, str] = {}
+    try:
+        ip_obj = ipaddress.ip_address(host)
+        ip_map[host] = str(ip_obj)
+    except ValueError:
+        resolved_ips = resolve_hostname_ips(host)
+        if resolved_ips:
+            ip_map[host] = str(resolved_ips[0])
+
+    backend = PinnedNetworkBackend(ip_map)
+    pool = httpcore.AsyncConnectionPool(network_backend=backend)
+    transport = httpx.AsyncHTTPTransport(verify=True)
+    transport._pool = pool
+    return httpx.AsyncClient(
+        transport=transport,
+        follow_redirects=True,
+        timeout=httpx.Timeout(timeout),
+    )
+

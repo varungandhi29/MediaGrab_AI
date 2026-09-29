@@ -1,0 +1,19 @@
+{
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/dist",
+  "framework": "vite",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://pay-pichunter-addresses-sword.trycloudflare.com/api/:path*"
+    },
+    {
+      "source": "/stream/:path*",
+      "destination": "https://pay-pichunter-addresses-sword.trycloudflare.com/stream/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

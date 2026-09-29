@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  mediagrab-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mediagrab-ai
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+      - ENVIRONMENT=production
+      - FILE_TTL_SECONDS=3600
+      - MAX_FILE_SIZE_BYTES=1073741824
+      - METADATA_RATE_LIMIT_REQUESTS=60
+      - METADATA_RATE_LIMIT_WINDOW_SECONDS=300
+      - DOWNLOAD_RATE_LIMIT_REQUESTS=20
+      - DOWNLOAD_RATE_LIMIT_WINDOW_SECONDS=600
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - mediagrab_storage:/app/backend/storage/downloads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048M
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+volumes:
+  mediagrab_storage:
+    driver: local

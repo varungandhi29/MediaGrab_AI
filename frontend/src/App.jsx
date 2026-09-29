@@ -9,6 +9,10 @@ import HowItWorksModal from './components/HowItWorksModal';
 import LegalTermsModal from './components/LegalTermsModal';
 import ErrorAlert from './components/ErrorAlert';
 import ExtractionStagesIndicator from './components/ExtractionStagesIndicator';
+import ResilienceDashboard from './components/ResilienceDashboard';
+import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
+import StatusBanner from './components/StatusBanner';
+import SupportedSitesAndFaq from './components/SupportedSitesAndFaq';
 
 import {
   fetchMetadata,
@@ -46,12 +50,22 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [isHowItWorksOpen, setIsHowItWorksOpen] = useState(false);
   const [isLegalOpen, setIsLegalOpen] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [stats, setStats] = useState(null);
 
-  // Load download history and system stats on mount
+  // Load download history and system stats on mount + global keyboard shortcut listener
   useEffect(() => {
     setHistory(getDownloadHistory());
     getSystemStats().then(setStats).catch(() => {});
+
+    const handleGlobalShortcuts = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === '?') {
+        setIsShortcutsOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalShortcuts);
+    return () => window.removeEventListener('keydown', handleGlobalShortcuts);
   }, []);
 
   // Fetch Metadata Flow with Live Fast-Fail Multi-Tier Streaming
@@ -123,9 +137,10 @@ export default function App() {
     }
   };
 
-  // Download Execution Flow
-  const handleStartDownload = async () => {
-    if (!metadata || !selectedQuality) return;
+  // Download Execution Flow (supports clip options start_time & end_time)
+  const handleStartDownload = async (customQuality = null, clipOptions = {}) => {
+    const targetQuality = customQuality || selectedQuality;
+    if (!metadata || !targetQuality) return;
 
     setIsDownloading(true);
     setErrorMessage(null);
@@ -133,10 +148,12 @@ export default function App() {
     try {
       const job = await startDownload({
         url: metadata.url,
-        quality_label: selectedQuality.quality_label,
-        format_id: selectedQuality.format_id,
-        is_audio_only: selectedQuality.is_audio_only,
-        target_format: selectedQuality.ext || 'mp4',
+        quality_label: targetQuality.quality_label,
+        format_id: targetQuality.format_id,
+        is_audio_only: targetQuality.is_audio_only,
+        target_format: targetQuality.ext || 'mp4',
+        start_time: clipOptions.startTime || null,
+        end_time: clipOptions.endTime || null,
       });
 
       setActiveJob(job);
@@ -265,12 +282,16 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-cyber-dark text-slate-100 selection:bg-emerald-500 selection:text-slate-950">
       
+      {/* Live System Status Banner */}
+      <StatusBanner />
+
       {/* Top Navigation */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onOpenHowItWorks={() => setIsHowItWorksOpen(true)}
         onOpenLegal={() => setIsLegalOpen(true)}
+        onOpenShortcuts={() => setIsShortcutsOpen(true)}
         historyCount={history.length}
       />
 
@@ -279,7 +300,7 @@ export default function App() {
         
         {activeTab === 'home' && (
           <div>
-            {/* Hero Header */}
+            {/* Hero Header - Honest Promise */}
             <div className="text-center max-w-2xl mx-auto mb-8 sm:mb-12">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold mb-4">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
@@ -287,14 +308,14 @@ export default function App() {
               </div>
 
               <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white mb-4">
-                Universal Media Downloader <br className="hidden sm:inline" />
+                Play &amp; Download Videos <br className="hidden sm:inline" />
                 <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400 bg-clip-text text-transparent">
-                  Powered by AI
+                  From Top Media Platforms
                 </span>
               </h1>
 
               <p className="text-sm sm:text-base text-slate-400 leading-relaxed">
-                Paste any link from 1,800+ platforms or direct media streams. Download genuine source resolutions up to 4K and high-fidelity MP3 audio.
+                Play and download videos from YouTube, Vimeo, and direct media files (.mp4, .webm, .m3u8). Genuine resolutions and clean audio playback with zero ads or tracking.
               </p>
             </div>
 
@@ -311,12 +332,16 @@ export default function App() {
               isVisible={isLoadingMetadata}
             />
 
-            {/* Error Alert */}
+            {/* Next Steps for Every Failure Error Alert */}
             <ErrorAlert
               error={errorMessage}
-              onDismiss={() => setErrorMessage(null)}
-              onExplainAi={() => handleExplainError(currentUrl, errorMessage)}
-              isExplaining={isExplainingError}
+              explanation={errorExplanation}
+              url={currentUrl}
+              onDismiss={() => {
+                setErrorMessage(null);
+                setErrorExplanation(null);
+              }}
+              onRetry={() => handleFetchMetadata(currentUrl)}
             />
 
             {/* AI Assistant Panel */}
@@ -333,6 +358,7 @@ export default function App() {
               <DownloadProgressBar
                 job={activeJob}
                 onReset={handleResetJob}
+                onRetry={() => handleStartDownload()}
               />
             )}
 
@@ -347,6 +373,9 @@ export default function App() {
                 setSelectedQuality={setSelectedQuality}
               />
             )}
+
+            {/* Supported Platforms & FAQ Accordion Section */}
+            <SupportedSitesAndFaq />
           </div>
         )}
 
@@ -358,6 +387,11 @@ export default function App() {
             onRemoveItem={handleRemoveHistoryItem}
             onReopenUrl={handleReopenUrl}
           />
+        )}
+
+        {/* System Resilience & Self-Healing Dashboard */}
+        {activeTab === 'resilience' && (
+          <ResilienceDashboard />
         )}
 
       </main>
@@ -374,6 +408,12 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-4">
+            <button
+              onClick={() => setIsShortcutsOpen(true)}
+              className="hover:text-slate-300 transition-colors"
+            >
+              Keyboard Shortcuts (?)
+            </button>
             <button
               onClick={() => setIsHowItWorksOpen(true)}
               className="hover:text-slate-300 transition-colors"
@@ -399,6 +439,11 @@ export default function App() {
       <LegalTermsModal
         isOpen={isLegalOpen}
         onClose={() => setIsLegalOpen(false)}
+      />
+
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsOpen}
+        onClose={() => setIsShortcutsOpen(false)}
       />
 
     </div>

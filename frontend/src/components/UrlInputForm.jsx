@@ -1,16 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Clipboard, X, ArrowRight, Loader2, Sparkles, CheckCircle2, ShieldAlert } from 'lucide-react';
-import { detectPlatform } from '../services/api';
+import {
+  Search,
+  Clipboard,
+  X,
+  ArrowRight,
+  Loader2,
+  CheckCircle2,
+  AlertTriangle,
+  FileQuestion,
+  ShieldAlert,
+  Play,
+  ExternalLink,
+  Info,
+} from 'lucide-react';
+import { checkLink } from '../services/api';
 
-const SAMPLE_URLS = [
-  { label: 'YouTube Video', url: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ' }, // Big Buck Bunny public CC
-  { label: 'Direct MP4 Stream', url: 'https://www.w3schools.com/html/mov_bbb.mp4' },
-  { label: 'Vimeo Creative', url: 'https://vimeo.com/76979871' },
+const DEMO_SAMPLES = [
+  { label: 'YouTube (4K / HD)', url: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ', tag: 'YouTube' },
+  { label: 'Vimeo (HD)', url: 'https://vimeo.com/76979871', tag: 'Vimeo' },
+  { label: 'Direct MP4 Stream', url: 'https://www.w3schools.com/html/mov_bbb.mp4', tag: 'Direct File' },
 ];
 
 export default function UrlInputForm({ onSubmit, isLoading, initialUrl = '' }) {
   const [url, setUrl] = useState(initialUrl);
-  const [detected, setDetected] = useState(null);
+  const [preCheck, setPreCheck] = useState(null);
+  const [isCheckingLink, setIsCheckingLink] = useState(false);
 
   useEffect(() => {
     if (initialUrl) {
@@ -18,20 +32,51 @@ export default function UrlInputForm({ onSubmit, isLoading, initialUrl = '' }) {
     }
   }, [initialUrl]);
 
-  // Live platform auto-detection debounce
+  // Global paste handler: Ctrl+V or Cmd+V anywhere on page populates input and triggers pre-check
   useEffect(() => {
-    if (!url || url.length < 5) {
-      setDetected(null);
+    const handleGlobalPaste = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      const clipboardData = e.clipboardData || window.clipboardData;
+      const pastedData = clipboardData?.getData('Text');
+      if (pastedData && (pastedData.startsWith('http://') || pastedData.startsWith('https://'))) {
+        e.preventDefault();
+        const cleanPasted = pastedData.trim();
+        setUrl(cleanPasted);
+        runPreCheck(cleanPasted);
+      }
+    };
+
+    window.addEventListener('paste', handleGlobalPaste);
+    return () => window.removeEventListener('paste', handleGlobalPaste);
+  }, []);
+
+  // Debounced Instant Link Pre-check (< 300ms)
+  const runPreCheck = async (targetUrl) => {
+    if (!targetUrl || targetUrl.trim().length < 4) {
+      setPreCheck(null);
       return;
     }
 
-    const timer = setTimeout(async () => {
-      try {
-        const info = await detectPlatform(url);
-        setDetected(info);
-      } catch (e) {
-        setDetected(null);
-      }
+    setIsCheckingLink(true);
+    try {
+      const res = await checkLink(targetUrl.trim());
+      setPreCheck(res);
+    } catch (e) {
+      setPreCheck(null);
+    } finally {
+      setIsCheckingLink(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!url || url.trim().length < 4) {
+      setPreCheck(null);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      runPreCheck(url);
     }, 250);
 
     return () => clearTimeout(timer);
@@ -47,16 +92,19 @@ export default function UrlInputForm({ onSubmit, isLoading, initialUrl = '' }) {
     try {
       const text = await navigator.clipboard.readText();
       if (text) {
-        setUrl(text.trim());
+        const clean = text.trim();
+        setUrl(clean);
+        runPreCheck(clean);
       }
     } catch (e) {
       console.warn('Clipboard read permission denied', e);
     }
   };
 
-  const handleSelectSample = (sampleUrl) => {
-    setUrl(sampleUrl);
-    onSubmit(sampleUrl);
+  const handleSelectDemo = (demoUrl) => {
+    setUrl(demoUrl);
+    runPreCheck(demoUrl);
+    onSubmit(demoUrl);
   };
 
   return (
@@ -71,7 +119,7 @@ export default function UrlInputForm({ onSubmit, isLoading, initialUrl = '' }) {
               type="text"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="Paste any media link (YouTube, Vimeo, TikTok, X, direct MP4, etc.)..."
+              placeholder="Paste a link from YouTube, Vimeo, X, Reddit, or direct MP4..."
               disabled={isLoading}
               className="w-full bg-transparent text-slate-100 placeholder-slate-500 text-sm sm:text-base outline-none pr-16 py-2.5"
             />
@@ -81,7 +129,10 @@ export default function UrlInputForm({ onSubmit, isLoading, initialUrl = '' }) {
               {url ? (
                 <button
                   type="button"
-                  onClick={() => setUrl('')}
+                  onClick={() => {
+                    setUrl('');
+                    setPreCheck(null);
+                  }}
                   className="p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                   title="Clear input"
                 >
@@ -110,45 +161,112 @@ export default function UrlInputForm({ onSubmit, isLoading, initialUrl = '' }) {
             {isLoading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Analyzing Media...</span>
+                <span>Checking link...</span>
               </>
             ) : (
               <>
-                <span>Fetch Media</span>
+                <span>Play &amp; Download</span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
           </button>
         </div>
 
-        {/* Live Auto-detected Platform Chip */}
-        {detected && (
-          <div className="mt-2.5 flex items-center justify-between px-3 text-xs">
-            <div className="flex items-center gap-2 text-emerald-400">
-              <span className="flex h-2 w-2 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span className="font-medium">Detected: {detected.platform}</span>
-              <span className="text-slate-500">•</span>
-              <span className="text-slate-400 hidden sm:inline">{detected.confirmation}</span>
-            </div>
-            <span className="text-[11px] text-slate-500">SSRF Pre-flight Active</span>
+        {/* Instant Link Pre-Check Status Feedback */}
+        {isCheckingLink && (
+          <div className="mt-2.5 flex items-center gap-2 px-3 text-xs text-slate-400 animate-pulse">
+            <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
+            <span>Checking link compatibility...</span>
           </div>
         )}
+
+        {preCheck && !isCheckingLink && (
+          <div className="mt-3">
+            {/* Supported site */}
+            {preCheck.status === 'supported_site' && (
+              <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-xs text-emerald-300">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span className="font-semibold">{preCheck.label}:</span>
+                  <span>{preCheck.platform_name}</span>
+                </div>
+                <span className="text-[11px] text-emerald-400/80">Ready to play</span>
+              </div>
+            )}
+
+            {/* Direct video file */}
+            {preCheck.status === 'direct_media' && (
+              <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-xs text-cyan-300">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-cyan-400" />
+                  <span className="font-semibold">{preCheck.label}</span>
+                  <span className="text-slate-400">({preCheck.domain})</span>
+                </div>
+                <span className="text-[11px] text-cyan-400/80">Direct stream ready</span>
+              </div>
+            )}
+
+            {/* Probably unsupported: File-Sharing or DRM Alert Card */}
+            {(preCheck.status === 'unsupported_file_sharing' ||
+              preCheck.status === 'unsupported_drm' ||
+              preCheck.status === 'unsupported_generic') && (
+              <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-200 text-xs space-y-2 animate-fadeIn">
+                <div className="flex items-center gap-2 font-bold text-amber-300">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                  <span>{preCheck.label} — {preCheck.platform_name}</span>
+                </div>
+                <p className="text-amber-200/90 leading-relaxed">
+                  {preCheck.explanation}
+                </p>
+                {preCheck.alternatives && preCheck.alternatives.length > 0 && (
+                  <div className="pt-2 border-t border-amber-500/20">
+                    <span className="font-semibold text-amber-300 block mb-1">What you can do instead:</span>
+                    <ul className="list-disc list-inside space-y-0.5 text-amber-100/80 text-[11px]">
+                      {preCheck.alternatives.map((alt, idx) => (
+                        <li key={idx}>{alt}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Invalid URL */}
+            {preCheck.status === 'invalid' && (
+              <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-rose-950/40 border border-rose-500/30 text-xs text-rose-300">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-rose-400" />
+                  <span className="font-semibold">{preCheck.label}</span>
+                  <span className="text-rose-400/80">• {preCheck.explanation}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Clear Disclaimer under input */}
+        <div className="mt-2.5 px-3 flex items-center justify-between text-[11px] text-slate-500">
+          <p className="flex items-center gap-1.5">
+            <Info className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+            <span>File-sharing pages, private videos, DRM-protected and login-only content are not supported.</span>
+          </p>
+        </div>
       </form>
 
-      {/* Quick Test Samples */}
-      <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs text-slate-400">
-        <span className="text-slate-500">Try quick sample:</span>
-        {SAMPLE_URLS.map((sample, idx) => (
+      {/* 3 Clickable Working Demo Links */}
+      <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5 text-xs text-slate-400">
+        <span className="text-slate-500 text-[11px] uppercase tracking-wider font-semibold">
+          Try working demo:
+        </span>
+        {DEMO_SAMPLES.map((demo, idx) => (
           <button
             key={idx}
             type="button"
-            onClick={() => handleSelectSample(sample.url)}
-            className="px-2.5 py-1 rounded-full bg-slate-800/60 hover:bg-slate-800 text-slate-300 hover:text-emerald-300 border border-slate-700/60 hover:border-emerald-500/40 transition-all"
+            onClick={() => handleSelectDemo(demo.url)}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-emerald-300 border border-slate-700 hover:border-emerald-500/40 transition-all shadow-sm"
           >
-            {sample.label}
+            <Play className="w-3 h-3 text-emerald-400" />
+            <span>{demo.label}</span>
           </button>
         ))}
       </div>

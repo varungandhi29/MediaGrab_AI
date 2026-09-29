@@ -1,7 +1,7 @@
 import React from 'react';
-import { Shield, Sparkles, History, HelpCircle, FileText, Cpu } from 'lucide-react';
+import { Shield, Sparkles, History, HelpCircle, FileText, Cpu, Activity, Keyboard } from 'lucide-react';
 
-export default function Navbar({ activeTab, setActiveTab, onOpenHowItWorks, onOpenLegal, historyCount = 0 }) {
+export default function Navbar({ activeTab, setActiveTab, onOpenHowItWorks, onOpenLegal, onOpenShortcuts, historyCount = 0 }) {
   return (
     <header className="sticky top-0 z-40 w-full border-b border-cyber-border/70 bg-cyber-dark/85 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -65,6 +65,27 @@ export default function Navbar({ activeTab, setActiveTab, onOpenHowItWorks, onOp
                 {historyCount}
               </span>
             )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('resilience')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+              activeTab === 'resilience'
+                ? 'bg-slate-800 text-white shadow-sm'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+            }`}
+          >
+            <Activity className="w-4 h-4 text-emerald-400" />
+            <span>Resilience</span>
+          </button>
+
+          <button
+            onClick={onOpenShortcuts}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800/50 transition-colors"
+            title="Keyboard Shortcuts Cheatsheet (Hotkey: ?)"
+          >
+            <Keyboard className="w-4 h-4 text-emerald-400" />
+            <span className="hidden sm:inline">Shortcuts</span>
           </button>
 
           <button

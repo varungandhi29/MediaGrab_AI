@@ -210,51 +210,22 @@ class AiAssistantService:
 
     async def explain_error(self, url: str, raw_error: str) -> AiErrorExplanationResponse:
         """
-        Translates raw server or extractor errors into clear, friendly explanations.
+        Translates raw server or extractor errors into clear, friendly explanations
+        with actionable steps, next actions, and debug info across all 9 UX error classes.
         """
-        err_lower = (raw_error or "").lower()
-
-        if "ssrf" in err_lower or "internal ip" in err_lower or "restricted" in err_lower:
-            return AiErrorExplanationResponse(
-                category="Security Policy Violation",
-                human_summary="Access to this URL is blocked by MediaGrab AI's Server-Side Request Forgery (SSRF) defense.",
-                suggested_action="Ensure the URL points to a legitimate public Internet domain. Localhost, 127.0.0.1, private LAN, and cloud metadata addresses are permanently restricted."
-            )
-
-        if "private" in err_lower or "authentication" in err_lower or "login" in err_lower:
-            return AiErrorExplanationResponse(
-                category="Private or Restricted Content",
-                human_summary="This media is marked private, unlisted, or requires an authenticated account to view.",
-                suggested_action="Check if the content owner has made the video publicly visible. MediaGrab AI does not bypass access permissions or credential requirements."
-            )
-
-        if "geo" in err_lower or "country" in err_lower or "region" in err_lower:
-            return AiErrorExplanationResponse(
-                category="Geographically Blocked",
-                human_summary="The host platform has placed geographical licensing restrictions on this media.",
-                suggested_action="The content is unavailable in the server's region. Try downloading from a mirror or directly within the allowed country."
-            )
-
-        if "429" in err_lower or "too many requests" in err_lower or "rate limit" in err_lower:
-            return AiErrorExplanationResponse(
-                category="Rate Limit Exceeded",
-                human_summary="The host platform or MediaGrab AI has temporarily rate-limited requests from your IP to prevent abuse.",
-                suggested_action="Please wait 1 to 2 minutes before making another download attempt."
-            )
-
-        if "no downloadable media" in err_lower:
-            return AiErrorExplanationResponse(
-                category="No Media Detected",
-                human_summary="Our 3-tier inspection engine checked yt-dlp extractors, direct media headers, and HTML5 tags, but found no open video stream.",
-                suggested_action="The page might require JavaScript interaction, rely on encrypted DRM (Widevine), or be located behind a login wall."
-            )
-
-        # Default fallback explanation
+        from ..resilience.error_classifier import get_ux_error_details
+        ux = get_ux_error_details(raw_error, url=url)
         return AiErrorExplanationResponse(
-            category="Processing Error",
-            human_summary="Unable to extract media from this URL due to a platform response issue.",
-            suggested_action="Verify that the link is accurate and accessible in a standard web browser, then try again."
+            category=ux["plain_title"],
+            human_summary=ux["what_happened"],
+            suggested_action=" ".join(ux["what_to_try"]),
+            error_class=ux["error_class"],
+            what_happened=ux["what_happened"],
+            what_to_try=ux["what_to_try"],
+            can_retry=ux["can_retry"],
+            debug_info=ux["debug_info"],
         )
+
 
     async def _call_gemini_recommendation(
         self,

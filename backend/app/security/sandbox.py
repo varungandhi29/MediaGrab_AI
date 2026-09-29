@@ -49,15 +49,21 @@ def build_sandboxed_ytdlp_args(
 ) -> List[str]:
     """
     Generates a secure, locked-down argument list for yt-dlp.
-    Disables local config, local cache, post-exec scripts, playlist explosions,
-    and sets strict socket timeouts and size ceilings.
+    Disables local config, post-exec scripts, playlist explosions,
+    and sets strict socket timeouts and size ceilings while using an isolated storage cache.
     """
+    cache_dir = settings.STORAGE_DIR / ".cache" / "ytdlp"
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
     args = [
         sys.executable,
         "-m",
         "yt_dlp",
         "--no-config",             # Ignore any local or user configuration files
-        "--no-cache-dir",          # Do not write or read from local disk cache
+        "--cache-dir", str(cache_dir),  # Cache player JS in dedicated storage directory for sub-5s speed
         "--no-warnings",
         "--no-playlist",           # Reject playlist mass-downloads (DDoS prevention)
         "--socket-timeout", "15",  # Network socket timeout
@@ -88,11 +94,17 @@ def build_sandboxed_ytdlp_args(
         if format_selector:
             args.extend(["-f", format_selector])
 
-        # Report progress in machine-parseable format
+        # Report progress in unambiguous machine-parseable format with pipe delimiters
         args.extend([
             "--newline",
-            "--progress-template", "download:[PROGRESS]:%(progress._percent_str)s:%(progress._speed_str)s:%(progress._eta_str)s"
+            "--progress-template", "download:[PROGRESS]|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s"
         ])
+
+    # Enable Node.js JS runtime if available for player cipher and n-sig challenge solving
+    import shutil
+    node_exe = shutil.which("node") or (r"C:\Program Files\nodejs\node.exe" if os.path.exists(r"C:\Program Files\nodejs\node.exe") else None)
+    if node_exe:
+        args.extend(["--js-runtimes", f"node:{node_exe}"])
 
     if extra_safe_args:
         args.extend(extra_safe_args)
@@ -107,7 +119,7 @@ async def run_sandboxed_subprocess(
     cmd_args: List[str],
     timeout_seconds: int = 30,
     cwd: Optional[Path] = None,
-    max_output_bytes: int = 15 * 1024 * 1024,  # 15MB limit
+    max_output_bytes: int = 25 * 1024 * 1024,  # 25MB limit
 ) -> Tuple[int, str, str]:
     """
     Executes a subprocess in isolation without shell=True, applying a hard timeout

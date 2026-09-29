@@ -29,6 +29,8 @@ async def start_download(payload: DownloadRequest, request: Request):
         format_id=payload.format_id,
         is_audio_only=payload.is_audio_only,
         target_format=payload.target_format,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
     )
     return job.to_dict()
 

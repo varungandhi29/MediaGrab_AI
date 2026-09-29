@@ -45,7 +45,7 @@ export default function ExtractionStagesIndicator({
 
         <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono">
           <Clock className="w-3.5 h-3.5 text-cyan-400" />
-          <span>Elapsed: {elapsedSeconds}s / 30s max</span>
+          <span>Elapsed: {elapsedSeconds}s / 45s max</span>
         </div>
       </div>
 
@@ -55,12 +55,16 @@ export default function ExtractionStagesIndicator({
           const Icon = t.icon;
           const isCurrent = currentTierNum === t.tier;
           const isPassed = currentTierNum > t.tier;
+          const isRetry = isCurrent && currentStage?.stage === 'retry';
+          const isCircuitSkip = currentStage?.stage === 'circuit_skip' && currentTierNum === t.tier;
 
           return (
             <div
               key={t.tier}
               className={`p-3 rounded-xl border text-left transition-all relative overflow-hidden ${
-                isCurrent
+                isRetry
+                  ? 'bg-amber-950/40 border-amber-500/80 text-white shadow-lg shadow-amber-500/10'
+                  : isCurrent
                   ? 'bg-emerald-950/30 border-emerald-500 text-white shadow-lg shadow-emerald-500/10'
                   : isPassed
                   ? 'bg-slate-900/40 border-slate-800/80 text-slate-400 opacity-75'
@@ -69,25 +73,28 @@ export default function ExtractionStagesIndicator({
             >
               {/* Active Pulse Border Effect */}
               {isCurrent && (
-                <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 animate-pulse" />
+                <div className={`absolute top-0 left-0 right-0 h-0.5 ${
+                  isRetry ? 'bg-amber-400 animate-pulse' : 'bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 animate-pulse'
+                }`} />
               )}
 
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-1.5">
                   <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
-                    isCurrent ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-400'
+                    isRetry ? 'bg-amber-500 text-slate-950' : isCurrent ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-400'
                   }`}>
                     Tier {t.tier}
                   </span>
                   <span className="text-[10px] text-slate-500 font-mono">({t.maxTime})</span>
                 </div>
 
-                {isCurrent && <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin" />}
+                {isRetry && <span className="text-[9px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold">RETRY</span>}
+                {isCurrent && !isRetry && <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin" />}
                 {isPassed && <CheckCircle2 className="w-3.5 h-3.5 text-slate-500" />}
               </div>
 
               <div className="flex items-center gap-1.5 mt-1">
-                <Icon className={`w-3.5 h-3.5 ${isCurrent ? 'text-emerald-400' : 'text-slate-500'}`} />
+                <Icon className={`w-3.5 h-3.5 ${isRetry ? 'text-amber-400' : isCurrent ? 'text-emerald-400' : 'text-slate-500'}`} />
                 <span className="text-xs font-semibold truncate text-slate-200">{t.label}</span>
               </div>
 
@@ -98,12 +105,20 @@ export default function ExtractionStagesIndicator({
       </div>
 
       {/* Current Real-Time Status Message */}
-      <div className="mt-3.5 px-3 py-2 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between text-xs">
-        <div className="flex items-center gap-2 text-slate-300">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-          <span className="font-medium text-emerald-300">{currentMessage}</span>
+      <div className={`mt-3.5 px-3 py-2 rounded-xl border flex items-center justify-between text-xs transition-colors ${
+        currentStage?.stage === 'retry'
+          ? 'bg-amber-950/40 border-amber-500/40 text-amber-200'
+          : currentStage?.stage === 'circuit_skip'
+          ? 'bg-purple-950/40 border-purple-500/40 text-purple-200'
+          : 'bg-slate-900/80 border-slate-800 text-slate-300'
+      }`}>
+        <div className="flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full animate-ping ${
+            currentStage?.stage === 'retry' ? 'bg-amber-400' : 'bg-emerald-400'
+          }`} />
+          <span className="font-medium">{currentMessage}</span>
         </div>
-        <span className="text-[11px] text-slate-500 hidden sm:inline">Automatic bailout on failure</span>
+        <span className="text-[11px] text-slate-500 hidden sm:inline">Self-healing pipeline active</span>
       </div>
 
     </div>

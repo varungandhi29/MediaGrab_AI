@@ -45,11 +45,30 @@ class StorageManager:
         async with self._lock:
             self._tokens[token] = record
 
+        # Persist metadata to disk for cross-process access
+        try:
+            import json
+            meta_path = settings.STORAGE_DIR / f".token_{token}.json"
+            meta_path.write_text(json.dumps(record), encoding="utf-8")
+        except Exception:
+            pass
+
         return record
 
     async def get_download(self, token: str) -> Optional[Dict[str, Any]]:
         async with self._lock:
             record = self._tokens.get(token)
+            if not record:
+                # Attempt to read from persisted disk metadata
+                meta_path = settings.STORAGE_DIR / f".token_{token}.json"
+                if meta_path.exists():
+                    try:
+                        import json
+                        record = json.loads(meta_path.read_text(encoding="utf-8"))
+                        self._tokens[token] = record
+                    except Exception:
+                        pass
+
             if not record:
                 return None
 
@@ -57,6 +76,7 @@ class StorageManager:
             filepath = Path(record["filepath"])
             if not filepath.exists():
                 del self._tokens[token]
+                (settings.STORAGE_DIR / f".token_{token}.json").unlink(missing_ok=True)
                 return None
 
             return record
@@ -83,6 +103,7 @@ class StorageManager:
 
             for token in expired_tokens:
                 del self._tokens[token]
+                (settings.STORAGE_DIR / f".token_{token}.json").unlink(missing_ok=True)
 
         # Also scan storage directory for any orphaned temporary files
         try:

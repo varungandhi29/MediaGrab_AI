@@ -1,0 +1,98 @@
+[
+  {
+    "id": "yt_big_buck_bunny",
+    "name": "YouTube - Big Buck Bunny 4K/HD",
+    "url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+    "domain": "youtube.com",
+    "expected_category": "supported",
+    "expected_platform": "YouTube"
+  },
+  {
+    "id": "vimeo_sample",
+    "name": "Vimeo - The New Normal",
+    "url": "https://vimeo.com/76979871",
+    "domain": "vimeo.com",
+    "expected_category": "supported",
+    "expected_platform": "Vimeo"
+  },
+  {
+    "id": "direct_mp4_bbb",
+    "name": "Direct MP4 Video Stream",
+    "url": "https://www.w3schools.com/html/mov_bbb.mp4",
+    "domain": "w3schools.com",
+    "expected_category": "direct_media",
+    "expected_platform": "Direct Video Link"
+  },
+  {
+    "id": "direct_audio_mp3",
+    "name": "Direct MP3 Audio Stream",
+    "url": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+    "domain": "soundhelix.com",
+    "expected_category": "direct_media",
+    "expected_platform": "Direct Audio Link"
+  },
+  {
+    "id": "gdrive_sharing",
+    "name": "Google Drive File Sharing",
+    "url": "https://drive.google.com/file/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs/view",
+    "domain": "drive.google.com",
+    "expected_category": "unsupported_file_sharing",
+    "expected_platform": "Google Drive"
+  },
+  {
+    "id": "dropbox_sharing",
+    "name": "Dropbox File Sharing",
+    "url": "https://www.dropbox.com/s/sample123/video.mp4",
+    "domain": "dropbox.com",
+    "expected_category": "unsupported_file_sharing",
+    "expected_platform": "Dropbox"
+  },
+  {
+    "id": "mega_sharing",
+    "name": "Mega.nz File Sharing",
+    "url": "https://mega.nz/file/sample123#key123",
+    "domain": "mega.nz",
+    "expected_category": "unsupported_file_sharing",
+    "expected_platform": "Mega"
+  },
+  {
+    "id": "mediafire_sharing",
+    "name": "MediaFire File Sharing",
+    "url": "https://www.mediafire.com/file/sample123/file.zip",
+    "domain": "mediafire.com",
+    "expected_category": "unsupported_file_sharing",
+    "expected_platform": "MediaFire"
+  },
+  {
+    "id": "netflix_drm",
+    "name": "Netflix DRM Protected Stream",
+    "url": "https://www.netflix.com/watch/80057281",
+    "domain": "netflix.com",
+    "expected_category": "unsupported_drm",
+    "expected_platform": "Netflix"
+  },
+  {
+    "id": "spotify_login",
+    "name": "Spotify DRM Audio",
+    "url": "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
+    "domain": "spotify.com",
+    "expected_category": "unsupported_drm",
+    "expected_platform": "Spotify"
+  },
+  {
+    "id": "invalid_url_text",
+    "name": "Invalid URL String",
+    "url": "not-a-valid-url",
+    "domain": "",
+    "expected_category": "invalid",
+    "expected_platform": "Invalid"
+  },
+  {
+    "id": "ssrf_private_ip",
+    "name": "Private Internal IP (SSRF)",
+    "url": "http://192.168.1.1/admin/video.mp4",
+    "domain": "192.168.1.1",
+    "expected_category": "invalid_ssrf",
+    "expected_platform": "Restricted Network"
+  }
+]

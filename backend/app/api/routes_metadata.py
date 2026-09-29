@@ -1,3 +1,4 @@
+import time
 import json
 import asyncio
 import logging
@@ -8,6 +9,8 @@ from ..security.ssrf_validator import SSRFValidationError
 from ..security.rate_limiter import check_metadata_rate_limit, get_client_ip
 from ..security.sanitizer import sanitize_for_logging
 from ..services.extractor import media_extractor
+from ..services.feedback_manager import feedback_manager
+from ..resilience.error_classifier import extract_domain_from_url, FILE_HOST_UNSUPPORTED_MESSAGE
 
 logger = logging.getLogger("mediagrab.metadata")
 router = APIRouter(prefix="/api", tags=["metadata"])
@@ -25,28 +28,55 @@ async def extract_url_metadata(payload: UrlMetadataRequest, request: Request):
     logger.info(f"Metadata request from {client_ip} for URL: {clean_url_log}")
 
     try:
+        t0 = time.time()
         metadata = await media_extractor.extract_metadata(payload.url)
+        asyncio.create_task(feedback_manager.record_attempt(
+            domain=extract_domain_from_url(payload.url),
+            success=True,
+            duration_seconds=time.time() - t0
+        ))
         return metadata
     except SSRFValidationError as e:
         logger.warning(f"SSRF violation blocked for IP {client_ip}: {sanitize_for_logging(str(e))}")
+        asyncio.create_task(feedback_manager.record_attempt(
+            domain=extract_domain_from_url(payload.url),
+            success=False,
+            error_class="invalid"
+        ))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Security Alert: {str(e)}"
         )
     except TimeoutError as e:
         logger.warning(f"Extraction timeout for IP {client_ip}: {str(e)}")
+        asyncio.create_task(feedback_manager.record_attempt(
+            domain=extract_domain_from_url(payload.url),
+            success=False,
+            error_class="timeout"
+        ))
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail=str(e)
         )
     except ValueError as e:
         logger.info(f"Extraction failed for IP {client_ip}: {str(e)}")
+        err_cls = "FILE_HOST_UNSUPPORTED" if str(e) == FILE_HOST_UNSUPPORTED_MESSAGE else "unsupported_site"
+        asyncio.create_task(feedback_manager.record_attempt(
+            domain=extract_domain_from_url(payload.url),
+            success=False,
+            error_class=err_cls
+        ))
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e)
         )
     except Exception as e:
         logger.error(f"Internal extraction error for IP {client_ip}: {sanitize_for_logging(str(e))}")
+        asyncio.create_task(feedback_manager.record_attempt(
+            domain=extract_domain_from_url(payload.url),
+            success=False,
+            error_class="internal_error"
+        ))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while processing the media stream."
@@ -84,29 +114,57 @@ async def stream_metadata_extraction(url: str, request: Request):
 
         async def worker():
             try:
+                t0 = time.time()
                 meta = await media_extractor.extract_metadata(url, status_callback=status_callback)
+                asyncio.create_task(feedback_manager.record_attempt(
+                    domain=extract_domain_from_url(url),
+                    success=True,
+                    duration_seconds=time.time() - t0
+                ))
                 await queue.put({
                     "type": "result",
                     "metadata": meta.model_dump()
                 })
             except SSRFValidationError as e:
+                asyncio.create_task(feedback_manager.record_attempt(
+                    domain=extract_domain_from_url(url),
+                    success=False,
+                    error_class="invalid"
+                ))
                 await queue.put({
                     "type": "error",
                     "error": f"Security Alert: {str(e)}",
                     "is_ssrf": True,
                 })
             except TimeoutError as e:
+                asyncio.create_task(feedback_manager.record_attempt(
+                    domain=extract_domain_from_url(url),
+                    success=False,
+                    error_class="timeout"
+                ))
                 await queue.put({
                     "type": "error",
                     "error": str(e),
                     "is_timeout": True,
                 })
             except ValueError as e:
+                err_cls = "FILE_HOST_UNSUPPORTED" if str(e) == FILE_HOST_UNSUPPORTED_MESSAGE else "unsupported_site"
+                asyncio.create_task(feedback_manager.record_attempt(
+                    domain=extract_domain_from_url(url),
+                    success=False,
+                    error_class=err_cls
+                ))
                 await queue.put({
                     "type": "error",
                     "error": str(e),
+                    "error_class": err_cls,
                 })
             except Exception as e:
+                asyncio.create_task(feedback_manager.record_attempt(
+                    domain=extract_domain_from_url(url),
+                    success=False,
+                    error_class="internal_error"
+                ))
                 await queue.put({
                     "type": "error",
                     "error": "An error occurred while processing the media stream.",

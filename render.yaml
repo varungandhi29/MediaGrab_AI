@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: mediagrabai
+    env: docker
+    plan: free
+    region: oregon
+    dockerfilePath: Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: PORT
+        value: 10000
+      - key: GEMINI_API_KEY
+        sync: false

@@ -1,0 +1,17 @@
+.git
+.gitignore
+.pytest_cache
+node_modules
+frontend/node_modules
+frontend/dist
+backend/app/__pycache__
+backend/app/**/__pycache__
+backend/tests/__pycache__
+backend/tests/**/__pycache__
+backend/storage/downloads/*
+!backend/storage/downloads/.gitkeep
+scratch
+*.log
+.system_generated
+*.pyc
+.env

@@ -67,11 +67,21 @@ class HeadlessBrowserService:
 
                     page = await context.new_page()
 
-                    # ROUTE INTERCEPTION: Enforce strict SSRF protection inside the browser!
-                    # Any subresource request resolving to private/loopback/cloud metadata is instantly aborted.
+                    # ROUTE INTERCEPTION: Enforce strict SSRF protection and block ad trackers/fonts/analytics
                     async def handle_route(route: Route):
                         req = route.request
                         req_url = req.url
+                        req_url_low = req_url.lower()
+
+                        # Block ad trackers, analytics, fonts, and heavy telemetry to speed up page rendering 5x
+                        if any(k in req_url_low for k in [
+                            "google-analytics", "googletagmanager", "doubleclick", "facebook.net", "facebook.com",
+                            "analytics", "telemetry", "badjs", "kakao", "line.me", "app_ad", "adservice",
+                            ".woff", ".woff2", ".ttf", ".otf"
+                        ]):
+                            await route.abort("blockedbyclient")
+                            return
+
                         try:
                             # Verify every subresource URL against SSRF policy
                             sub_valid, _, _ = validate_url_ssrf(req_url)
@@ -84,43 +94,41 @@ class HeadlessBrowserService:
 
                     await page.route("**/*", handle_route)
 
+                    media_found_event = asyncio.Event()
+
                     # NETWORK RESPONSE INTERCEPTION: Sniff media streaming responses
                     async def handle_response(response: PlaywrightResponse):
                         resp_url = response.url
                         headers = response.headers
                         content_type = headers.get("content-type", "").lower()
-
-                        # Check if response is a media stream (.mp4, .m3u8, .webm) or video MIME
                         is_media_signature = bool(MEDIA_EXT_PATTERN.search(resp_url))
                         is_media_mime = any(
                             content_type.startswith(prefix)
                             for prefix in ["video/", "audio/", "application/x-mpegurl", "application/vnd.apple.mpegurl"]
-                        )
+                        ) or ("share/streaming" in resp_url and "type=M3U8" in resp_url)
+                        is_subtitle = any(s in resp_url.lower() for s in ["subtitle", ".srt", ".vtt", "subrip"]) or "subtitle" in content_type
 
-                        if is_media_signature or is_media_mime:
+                        if (is_media_signature or is_media_mime) and not is_subtitle:
                             # Re-verify candidate URL before storing
                             valid_cand, clean_cand, _ = validate_url_ssrf(resp_url)
                             if valid_cand and clean_cand not in discovered_media_urls:
                                 discovered_media_urls.append(clean_cand)
+                                media_found_event.set()
 
                     page.on("response", handle_response)
 
                     # Navigate with strict timeout
-                    nav_timeout_ms = min(timeout_seconds * 1000, 15000)
+                    nav_timeout_ms = min(timeout_seconds * 1000, 10000)
                     try:
                         await page.goto(safe_url, timeout=nav_timeout_ms, wait_until="domcontentloaded")
                     except Exception:
-                        # Page load may have partially completed; proceed to check what was captured
                         pass
 
-                    # Wait for network idle up to max 10s to let JS-driven content load
+                    # Fast early-exit: wait for media signature instead of waiting 10s for networkidle!
                     try:
-                        await page.wait_for_load_state("networkidle", timeout=10000)
-                    except Exception:
+                        await asyncio.wait_for(media_found_event.wait(), timeout=min(float(timeout_seconds), 4.5))
+                    except asyncio.TimeoutError:
                         pass
-
-                    # Small grace period for dynamic player initialization
-                    await asyncio.sleep(1.0)
 
                     # Inspect rendered post-JS DOM
                     try:
@@ -129,13 +137,18 @@ class HeadlessBrowserService:
                         pass
 
                     # Check for video elements in rendered DOM
+                    dom_duration = None
                     try:
                         dom_video_sources = await page.evaluate("""
                             () => {
                                 const urls = [];
+                                let dur = null;
                                 document.querySelectorAll('video').forEach(v => {
                                     if (v.src) urls.push(v.src);
                                     if (v.currentSrc) urls.push(v.currentSrc);
+                                    if (v.duration && !isNaN(v.duration) && isFinite(v.duration) && v.duration > 0 && !dur) {
+                                        dur = v.duration;
+                                    }
                                 });
                                 document.querySelectorAll('video source').forEach(s => {
                                     if (s.src) urls.push(s.src);
@@ -144,7 +157,7 @@ class HeadlessBrowserService:
                                 if (og && og.content) urls.push(og.content);
                                 const ogThumb = document.querySelector('meta[property="og:image"]');
                                 const thumb = ogThumb ? ogThumb.content : null;
-                                return { urls, thumb };
+                                return { urls, thumb, duration: dur };
                             }
                         """)
 
@@ -157,6 +170,7 @@ class HeadlessBrowserService:
                                         discovered_media_urls.append(clean_val)
 
                             page_thumbnail = dom_video_sources.get("thumb")
+                            dom_duration = dom_video_sources.get("duration")
                     except Exception:
                         pass
 
@@ -175,6 +189,7 @@ class HeadlessBrowserService:
             "media_urls": discovered_media_urls,
             "title": page_title.strip() or "Rendered Web Media",
             "thumbnail": page_thumbnail,
+            "duration": dom_duration,
         }
 
 

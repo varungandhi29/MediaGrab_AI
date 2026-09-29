@@ -1,9 +1,24 @@
+@import 'plyr/dist/plyr.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
   color-scheme: dark;
+  --plyr-color-main: #10b981;
+  --plyr-video-control-color: #f1f5f9;
+  --plyr-video-control-color-hover: #10b981;
+  --plyr-video-controls-background: linear-gradient(rgba(0, 0, 0, 0), rgba(5, 8, 16, 0.95));
+  --plyr-menu-background: #0b111e;
+  --plyr-menu-color: #e2e8f0;
+  --plyr-menu-arrow-color: #94a3b8;
+  --plyr-tooltip-background: #0b111e;
+  --plyr-tooltip-color: #f8fafc;
+  --plyr-range-thumb-background: #10b981;
+  --plyr-range-fill-background: #10b981;
+  --plyr-control-radius: 8px;
+  --plyr-menu-radius: 12px;
 }
 
 body {
@@ -48,3 +63,84 @@ body {
   backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
+
+/* Explicit Plyr Control and Icon Visibility Guarantees */
+.plyr__control svg {
+  fill: currentColor !important;
+  pointer-events: none;
+}
+
+.plyr__control:not(.plyr__control--overlaid) svg {
+  width: 18px !important;
+  height: 18px !important;
+}
+
+.plyr__control--overlaid svg {
+  width: 32px !important;
+  height: 32px !important;
+  position: relative;
+  left: 2px;
+}
+
+/* Explicitly honor Plyr's toggle classes so pressed/unpressed icons switch cleanly */
+.plyr__control.plyr__control--pressed .icon--not-pressed,
+.plyr__control:not(.plyr__control--pressed) .icon--pressed,
+.plyr:fullscreen .plyr__control .icon--exit-fullscreen+svg,
+.plyr--fullscreen-fallback .plyr__control .icon--exit-fullscreen+svg {
+  display: none !important;
+}
+
+.plyr__control.plyr__control--pressed .icon--pressed,
+.plyr__control:not(.plyr__control--pressed) .icon--not-pressed {
+  display: block !important;
+}
+
+.plyr--video .plyr__control.plyr__tab-focus,
+.plyr--video .plyr__control:hover,
+.plyr--video .plyr__control[aria-expanded='true'] {
+  background: rgba(16, 185, 129, 0.25) !important;
+  color: #10b981 !important;
+}
+
+.plyr__controls {
+  padding: 10px 14px !important;
+  gap: 8px !important;
+}
+
+.plyr__menu__container {
+  background: #0f172a !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.6) !important;
+}
+
+.plyr__menu__container [role="menuitemradio"][aria-checked="true"]::before {
+  background: #10b981 !important;
+}
+
+/* Ensure Plyr fills 100% of the modal stage edge-to-edge without shrinking */
+.plyr,
+.plyr--video {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  flex: 1 1 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  background: #000 !important;
+}
+
+.plyr__video-wrapper {
+  width: 100% !important;
+  height: 100% !important;
+  flex: 1 1 100% !important;
+  background: #000 !important;
+}
+
+.plyr video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+}
+

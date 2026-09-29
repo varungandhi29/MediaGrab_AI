@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download, Music, Check, Sparkles, HardDrive, Loader2 } from 'lucide-react';
+import { Download, Music, Check, Sparkles, HardDrive, Loader2, Play } from 'lucide-react';
 
 export default function QualitySelector({
   qualities = [],
@@ -7,6 +7,7 @@ export default function QualitySelector({
   onSelectQuality,
   recommendedQuality,
   onDownload,
+  onPlay,
   isDownloading,
 }) {
   if (!qualities || qualities.length === 0) {
@@ -125,25 +126,39 @@ export default function QualitySelector({
         )}
       </div>
 
-      {/* Primary Action Button */}
-      <button
-        type="button"
-        disabled={isDownloading || !selectedQuality}
-        onClick={onDownload}
-        className="w-full flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-bold text-base shadow-xl shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-emerald-500/35 transition-all duration-200"
-      >
-        {isDownloading ? (
-          <>
-            <Loader2 className="w-5 h-5 animate-spin" />
-            <span>Processing Download...</span>
-          </>
-        ) : (
-          <>
-            <Download className="w-5 h-5" />
-            <span>Download {selectedQuality?.quality_label || 'Selected'}</span>
-          </>
+      {/* Primary Action Buttons: Watch Video + Download */}
+      <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+        {onPlay && (
+          <button
+            type="button"
+            onClick={onPlay}
+            className="flex-1 flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700/90 border border-slate-700 hover:border-emerald-500/50 text-white font-semibold text-sm shadow-md transition-all group"
+            title="Watch video in-browser before downloading"
+          >
+            <Play className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform fill-emerald-400/30" />
+            <span>Watch Video</span>
+          </button>
         )}
-      </button>
+
+        <button
+          type="button"
+          disabled={isDownloading || !selectedQuality}
+          onClick={onDownload}
+          className={`${onPlay ? 'flex-[1.5]' : 'w-full'} flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-bold text-sm sm:text-base shadow-xl shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-emerald-500/35 transition-all duration-200`}
+        >
+          {isDownloading ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span>Processing Download...</span>
+            </>
+          ) : (
+            <>
+              <Download className="w-5 h-5" />
+              <span>Download {selectedQuality?.quality_label || 'Selected'}</span>
+            </>
+          )}
+        </button>
+      </div>
     </div>
   );
 }
