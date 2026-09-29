@@ -11,7 +11,8 @@ import ErrorAlert from './components/ErrorAlert';
 import ExtractionStagesIndicator from './components/ExtractionStagesIndicator';
 import ResilienceDashboard from './components/ResilienceDashboard';
 import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
-import StatusBanner from './components/StatusBanner';
+import AuthModal from './components/AuthModal';
+import LoginPage from './components/LoginPage';
 import SupportedSitesAndFaq from './components/SupportedSitesAndFaq';
 
 import {
@@ -52,6 +53,26 @@ export default function App() {
   const [isLegalOpen, setIsLegalOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [stats, setStats] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('mediagrab_user') || sessionStorage.getItem('mediagrab_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+
+  const handleLoginSuccess = (user) => {
+    setCurrentUser(user);
+    setIsAuthOpen(false);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('mediagrab_user');
+    sessionStorage.removeItem('mediagrab_user');
+    setCurrentUser(null);
+  };
 
   // Load download history and system stats on mount + global keyboard shortcut listener
   useEffect(() => {
@@ -282,9 +303,6 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-cyber-dark text-slate-100 selection:bg-emerald-500 selection:text-slate-950">
       
-      {/* Live System Status Banner */}
-      <StatusBanner />
-
       {/* Top Navigation */}
       <Navbar
         activeTab={activeTab}
@@ -292,6 +310,9 @@ export default function App() {
         onOpenHowItWorks={() => setIsHowItWorksOpen(true)}
         onOpenLegal={() => setIsLegalOpen(true)}
         onOpenShortcuts={() => setIsShortcutsOpen(true)}
+        onOpenAuth={() => setIsAuthOpen(true)}
+        onLogout={handleLogout}
+        currentUser={currentUser}
         historyCount={history.length}
       />
 
@@ -394,6 +415,17 @@ export default function App() {
           <ResilienceDashboard />
         )}
 
+        {/* Dedicated Login & Sign Up Page */}
+        {activeTab === 'login' && (
+          <LoginPage
+            onLoginSuccess={(user) => {
+              handleLoginSuccess(user);
+              setActiveTab('home');
+            }}
+            onNavigateHome={() => setActiveTab('home')}
+          />
+        )}
+
       </main>
 
       {/* Footer */}
@@ -444,6 +476,13 @@ export default function App() {
       <KeyboardShortcutsModal
         isOpen={isShortcutsOpen}
         onClose={() => setIsShortcutsOpen(false)}
+      />
+
+      {/* Authentication Modal */}
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        onSuccess={handleLoginSuccess}
       />
 
     </div>

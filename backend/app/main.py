@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .config import settings
-from .api import routes_metadata, routes_download, routes_stream, routes_ai, routes_system, routes_resilience, routes_rum, media_routes
+from .api import routes_metadata, routes_download, routes_stream, routes_ai, routes_system, routes_resilience, routes_rum, media_routes, routes_auth
 from .services.storage_manager import start_cleanup_worker
 from .resilience import start_self_healing_scheduler, start_worker_supervisor_loop
 from .resilience.synthetic_playback_monitor import synthetic_playback_monitor
@@ -98,6 +98,7 @@ app.include_router(routes_system.router)
 app.include_router(routes_resilience.router)
 app.include_router(routes_rum.router)
 app.include_router(media_routes.router)
+app.include_router(routes_auth.router)
 
 
 @app.get("/jobs/{job_id}")
