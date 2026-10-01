@@ -216,6 +216,49 @@ function resolveErrorClassAndDetails(rawError, url) {
     };
   }
 
+  // 9b. Backend / Gateway Connection
+  if (
+    err.includes('unreachable') ||
+    err.includes('gateway') ||
+    err.includes('connection error') ||
+    err.includes('failed to communicate') ||
+    err.includes('502') ||
+    err.includes('503') ||
+    err.includes('520') ||
+    err.includes('530') ||
+    err.includes('tunnel') ||
+    err.includes('failed to fetch')
+  ) {
+    return {
+      errorClass: 'service_unreachable',
+      title: 'Backend Service Reconnecting',
+      whatHappened: 'The media extraction backend service or cloud connection tunnel is currently reconnecting.',
+      whatToTry: [
+        'Wait 5–10 seconds and click Retry.',
+        'Ensure the MediaGrab AI background backend service is running on your machine.',
+        'Refresh the page and re-submit your link.',
+      ],
+      canRetry: true,
+      debugInfo: { error_class: 'service_unreachable', domain, timestamp: now, summary: (rawError || '').slice(0, 100) },
+    };
+  }
+
+  // 9c. TeraBox Notice
+  if (domain.includes('terabox') || domain.includes('1024tera') || domain.includes('tibibox')) {
+    return {
+      errorClass: 'terabox_notice',
+      title: 'TeraBox File Requires Direct Stream',
+      whatHappened: 'TeraBox links often require logging into a personal TeraBox account, solving a security captcha, or contain folder archives with multiple files.',
+      whatToTry: [
+        'Open the link directly in TeraBox to access the file.',
+        'Ensure the link points directly to a single shared video file, not a multi-file folder.',
+        'Use supported direct video platforms like YouTube or Vimeo for lossless extraction.',
+      ],
+      canRetry: true,
+      debugInfo: { error_class: 'terabox_notice', domain, timestamp: now, summary: (rawError || '').slice(0, 100) },
+    };
+  }
+
   // Default: Internal / Processing Error
   return {
     errorClass: 'internal_error',

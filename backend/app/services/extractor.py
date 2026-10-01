@@ -156,6 +156,8 @@ class MediaExtractionService:
             tb_res = await self._try_terabox_extraction(clean_url)
             if tb_res:
                 return tb_res
+            else:
+                raise ValueError("This TeraBox link is private, password-protected, expired, or requires account login. Direct video stream could not be extracted.")
 
         # Fast-track Flezen domain directly (bypass yt-dlp timeout & retries)
         if self._is_flezen_domain(clean_url):

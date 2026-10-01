@@ -4,18 +4,78 @@
 
 const API_BASE = '/api';
 
+/**
+ * Robust fetch wrapper that gracefully catches network / connection errors
+ */
+async function safeFetch(url, options = {}) {
+  try {
+    return await fetch(url, options);
+  } catch (err) {
+    throw new Error(
+      'Network connection error: Unable to communicate with MediaGrab AI server. Please verify your internet connection or check if the backend service is running.'
+    );
+  }
+}
+
+/**
+ * Robust JSON response parser that handles non-JSON / gateway HTML gracefully
+ */
+async function parseJsonResponse(resp, defaultErrorMsg = 'Request failed.') {
+  const contentType = resp.headers.get('content-type') || '';
+  let data = null;
+  let text = '';
+
+  if (contentType.includes('application/json')) {
+    try {
+      data = await resp.json();
+    } catch {
+      data = null;
+    }
+  }
+
+  if (data === null) {
+    try {
+      text = await resp.text();
+    } catch {
+      text = '';
+    }
+  }
+
+  if (!resp.ok) {
+    if (data && data.detail) {
+      if (typeof data.detail === 'string') {
+        throw new Error(data.detail);
+      } else if (Array.isArray(data.detail) && data.detail[0]?.msg) {
+        throw new Error(data.detail[0].msg);
+      }
+    }
+    if (resp.status === 502 || resp.status === 503 || resp.status === 504 || resp.status === 520 || resp.status === 530) {
+      throw new Error(
+        `Backend server or gateway is temporarily unreachable (HTTP ${resp.status}). The service is currently reconnecting.`
+      );
+    }
+    if (text.includes('An error occurred') || text.includes('<!DOCTYPE') || text.includes('<html')) {
+      throw new Error(`Server temporarily unavailable (HTTP ${resp.status}). Please try again in a few moments.`);
+    }
+    throw new Error(text || `${defaultErrorMsg} (HTTP ${resp.status})`);
+  }
+
+  if (data !== null) return data;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error('Received unexpected non-JSON response from server.');
+  }
+}
+
 export async function fetchMetadata(url) {
-  const resp = await fetch(`${API_BASE}/metadata`, {
+  const resp = await safeFetch(`${API_BASE}/metadata`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url }),
   });
-
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.detail || 'Failed to fetch media metadata.');
-  }
-  return data;
+  return parseJsonResponse(resp, 'Failed to fetch media metadata.');
 }
 
 export function fetchMetadataStream(url, { onStage, onResult, onError }) {
@@ -43,10 +103,10 @@ export function fetchMetadataStream(url, { onStage, onResult, onError }) {
     es.close();
     // Fallback to standard POST /api/metadata if SSE was disconnected
     fetchMetadata(url)
-      .then(meta => {
+      .then((meta) => {
         if (onResult) onResult(meta);
       })
-      .catch(err => {
+      .catch((err) => {
         if (onError) onError(err);
       });
   };
@@ -63,7 +123,7 @@ export async function startDownload({
   start_time = null,
   end_time = null,
 }) {
-  const resp = await fetch(`${API_BASE}/download`, {
+  const resp = await safeFetch(`${API_BASE}/download`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -76,21 +136,12 @@ export async function startDownload({
       end_time,
     }),
   });
-
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.detail || 'Failed to initiate download job.');
-  }
-  return data;
+  return parseJsonResponse(resp, 'Failed to initiate download job.');
 }
 
 export async function getDownloadStatus(jobId) {
-  const resp = await fetch(`${API_BASE}/download/status/${jobId}`);
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.detail || 'Failed to get job status.');
-  }
-  return data;
+  const resp = await safeFetch(`${API_BASE}/download/status/${jobId}`);
+  return parseJsonResponse(resp, 'Failed to get job status.');
 }
 
 export function getFileDownloadUrl(token) {
@@ -98,100 +149,115 @@ export function getFileDownloadUrl(token) {
 }
 
 export async function detectPlatform(url) {
-  const resp = await fetch(`${API_BASE}/ai/detect`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
-  });
-  if (!resp.ok) return null;
-  return resp.json();
+  try {
+    const resp = await safeFetch(`${API_BASE}/ai/detect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (!resp.ok) return null;
+    return await resp.json().catch(() => null);
+  } catch {
+    return null;
+  }
 }
 
 export async function getAiRecommendation({ url, use_case, available_qualities }) {
-  const resp = await fetch(`${API_BASE}/ai/recommend`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, use_case, available_qualities }),
-  });
-  if (!resp.ok) return null;
-  return resp.json();
+  try {
+    const resp = await safeFetch(`${API_BASE}/ai/recommend`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, use_case, available_qualities }),
+    });
+    if (!resp.ok) return null;
+    return await resp.json().catch(() => null);
+  } catch {
+    return null;
+  }
 }
 
 export async function getAiErrorExplanation({ url, raw_error }) {
-  const resp = await fetch(`${API_BASE}/ai/explain-error`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, raw_error }),
-  });
-  if (!resp.ok) return null;
-  return resp.json();
+  try {
+    const resp = await safeFetch(`${API_BASE}/ai/explain-error`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, raw_error }),
+    });
+    if (!resp.ok) return null;
+    return await resp.json().catch(() => null);
+  } catch {
+    return null;
+  }
 }
 
 export async function getSystemHealth() {
-  const resp = await fetch(`${API_BASE}/health`);
-  if (!resp.ok) return null;
-  return resp.json();
+  try {
+    const resp = await safeFetch(`${API_BASE}/health`);
+    if (!resp.ok) return null;
+    return await resp.json().catch(() => null);
+  } catch {
+    return null;
+  }
 }
 
 export async function getSystemStats() {
-  const resp = await fetch(`${API_BASE}/stats`);
-  if (!resp.ok) return null;
-  return resp.json();
+  try {
+    const resp = await safeFetch(`${API_BASE}/stats`);
+    if (!resp.ok) return null;
+    return await resp.json().catch(() => null);
+  } catch {
+    return null;
+  }
 }
 
 export async function getResilienceDashboard() {
-  const resp = await fetch(`${API_BASE}/system/resilience`);
-  if (!resp.ok) {
-    throw new Error('Failed to fetch resilience dashboard telemetry.');
-  }
-  return resp.json();
+  const resp = await safeFetch(`${API_BASE}/system/resilience`);
+  return parseJsonResponse(resp, 'Failed to fetch resilience dashboard telemetry.');
 }
 
 export async function resetCircuitBreaker({ tier, domain } = {}) {
-  const resp = await fetch(`${API_BASE}/system/resilience/circuits/reset`, {
+  const resp = await safeFetch(`${API_BASE}/system/resilience/circuits/reset`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tier, domain }),
   });
-  if (!resp.ok) {
-    throw new Error('Failed to reset circuit breaker.');
-  }
-  return resp.json();
+  return parseJsonResponse(resp, 'Failed to reset circuit breaker.');
 }
 
 export async function triggerYtDlpUpdate(force = false) {
-  const resp = await fetch(`${API_BASE}/system/resilience/update-ytdlp?force=${force}`, {
+  const resp = await safeFetch(`${API_BASE}/system/resilience/update-ytdlp?force=${force}`, {
     method: 'POST',
   });
-  if (!resp.ok) {
-    throw new Error('Failed to trigger dependency self-healing update.');
-  }
-  return resp.json();
+  return parseJsonResponse(resp, 'Failed to trigger dependency self-healing update.');
 }
 
 export async function triggerTestAlert(domain = 'example.com') {
-  const resp = await fetch(`${API_BASE}/system/resilience/test-alert?domain=${encodeURIComponent(domain)}`, {
-    method: 'POST',
-  });
-  return resp.json();
+  try {
+    const resp = await safeFetch(`${API_BASE}/system/resilience/test-alert?domain=${encodeURIComponent(domain)}`, {
+      method: 'POST',
+    });
+    return await resp.json().catch(() => null);
+  } catch {
+    return null;
+  }
 }
 
 export async function refreshStreamSession(token, sourceUrl = null) {
   const query = sourceUrl ? `?url=${encodeURIComponent(sourceUrl)}` : '';
-  const resp = await fetch(`${API_BASE}/stream/${token}/refresh${query}`, {
+  const resp = await safeFetch(`${API_BASE}/stream/${token}/refresh${query}`, {
     method: 'POST',
   });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(err.detail || 'Failed to refresh media stream.');
-  }
-  return resp.json();
+  return parseJsonResponse(resp, 'Failed to refresh media stream.');
 }
 
 export async function getStreamStatus(token) {
-  const resp = await fetch(`${API_BASE}/stream/${token}/status`);
-  if (!resp.ok) return null;
-  return resp.json();
+  try {
+    const resp = await safeFetch(`${API_BASE}/stream/${token}/status`);
+    if (!resp.ok) return null;
+    return await resp.json().catch(() => null);
+  } catch {
+    return null;
+  }
 }
 
 export function sendPlaybackRUM(telemetry) {
@@ -211,13 +277,10 @@ export function sendPlaybackRUM(telemetry) {
 }
 
 export async function triggerSyntheticPlaybackCheck() {
-  const resp = await fetch(`${API_BASE}/system/resilience/run-synthetic-playback`, {
+  const resp = await safeFetch(`${API_BASE}/system/resilience/run-synthetic-playback`, {
     method: 'POST',
   });
-  if (!resp.ok) {
-    throw new Error('Failed to run synthetic playback check.');
-  }
-  return resp.json();
+  return parseJsonResponse(resp, 'Failed to run synthetic playback check.');
 }
 
 export async function prepareMedia({
@@ -229,7 +292,7 @@ export async function prepareMedia({
   start_time = null,
   end_time = null,
 }) {
-  const resp = await fetch(`${API_BASE}/media/prepare`, {
+  const resp = await safeFetch(`${API_BASE}/media/prepare`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -242,12 +305,7 @@ export async function prepareMedia({
       end_time,
     }),
   });
-
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.detail || 'Failed to start media preparation.');
-  }
-  return data;
+  return parseJsonResponse(resp, 'Failed to start media preparation.');
 }
 
 export function streamMediaProgress(jobId, { onProgress, onReady, onError }) {
@@ -288,91 +346,55 @@ export function streamMediaProgress(jobId, { onProgress, onReady, onError }) {
 }
 
 export async function getMediaStatus(jobId) {
-  const resp = await fetch(`${API_BASE}/media/status/${jobId}`);
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.detail || 'Failed to get media status.');
-  }
-  return data;
+  const resp = await safeFetch(`${API_BASE}/media/status/${jobId}`);
+  return parseJsonResponse(resp, 'Failed to get media status.');
 }
 
 export async function cancelMediaJob(jobId) {
-  const resp = await fetch(`${API_BASE}/media/cancel/${jobId}`, {
+  const resp = await safeFetch(`${API_BASE}/media/cancel/${jobId}`, {
     method: 'POST',
   });
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.detail || 'Failed to cancel media job.');
-  }
-  return data;
+  return parseJsonResponse(resp, 'Failed to cancel media job.');
 }
 
 export async function checkLink(url) {
-  const resp = await fetch(`${API_BASE}/check-link`, {
+  const resp = await safeFetch(`${API_BASE}/check-link`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url }),
   });
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.detail || 'Failed to check link.');
-  }
-  return data;
+  return parseJsonResponse(resp, 'Failed to check link.');
 }
 
 export async function submitLinkReport({ url, domain, error_class, user_notes = '' }) {
-  const resp = await fetch(`${API_BASE}/feedback/report`, {
+  const resp = await safeFetch(`${API_BASE}/feedback/report`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url, domain, error_class, user_notes }),
   });
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.detail || 'Failed to submit report.');
-  }
-  return data;
+  return parseJsonResponse(resp, 'Failed to submit report.');
 }
 
 export async function submitRating({ url, domain, rating, action_type = 'play', comment = '' }) {
-  const resp = await fetch(`${API_BASE}/feedback/rating`, {
+  const resp = await safeFetch(`${API_BASE}/feedback/rating`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url, domain, rating, action_type, comment }),
   });
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.detail || 'Failed to submit rating.');
-  }
-  return data;
+  return parseJsonResponse(resp, 'Failed to submit rating.');
 }
 
 export async function getStatusBanner() {
-  const resp = await fetch(`${API_BASE}/system/status-banner`);
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.detail || 'Failed to fetch status banner.');
-  }
-  return data;
+  const resp = await safeFetch(`${API_BASE}/system/status-banner`);
+  return parseJsonResponse(resp, 'Failed to fetch status banner.');
 }
 
 export async function getUxMetrics() {
-  const resp = await fetch(`${API_BASE}/system/ux-metrics`);
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.detail || 'Failed to fetch UX metrics.');
-  }
-  return data;
+  const resp = await safeFetch(`${API_BASE}/system/ux-metrics`);
+  return parseJsonResponse(resp, 'Failed to fetch UX metrics.');
 }
 
 export async function getSupportedSites() {
-  const resp = await fetch(`${API_BASE}/system/supported-sites`);
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.detail || 'Failed to fetch supported sites.');
-  }
-  return data;
+  const resp = await safeFetch(`${API_BASE}/system/supported-sites`);
+  return parseJsonResponse(resp, 'Failed to fetch supported sites.');
 }
-
-
-
-

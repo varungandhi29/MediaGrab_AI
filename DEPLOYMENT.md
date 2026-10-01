@@ -224,7 +224,7 @@ Open `http://localhost:8000` in any browser!
 - **Password/IP for First-Time Browser Visit**: `49.36.76.97` (Localtunnel asks for tunnel IP on first visit for abuse prevention; once entered, it unlocks forever).
 
 ### 2. High-Performance Edge Tunnel (Zero Prompts, Live Now)
-- **URL**: [`https://pay-pichunter-addresses-sword.trycloudflare.com`](https://pay-pichunter-addresses-sword.trycloudflare.com)
+- **URL**: [`https://redhead-cooler-bride-clarke.trycloudflare.com`](https://redhead-cooler-bride-clarke.trycloudflare.com)
 - Powered by Cloudflare global CDN without any password prompts.
 
 ### 3. Your Own Custom Domain (e.g. `mediagrabai.com` or `mediagrab.ai`)
