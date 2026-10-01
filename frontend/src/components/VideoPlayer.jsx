@@ -1,24 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * VideoPlayer.jsx  --  drop-in player for MediaGrab AI
+ * VideoPlayer.jsx -- fixes "seeks forward, then freezes on a frame".
  *
- * Usage:
- *   <VideoPlayer jobId={job.id} />
+ * Root cause: some browsers internally pause the video while they fetch the
+ * new range after a seek, and don't reliably resume playback on their own.
+ * Fix: remember whether it was playing right before the seek (onSeeking),
+ * and explicitly resume it once the seek finishes (onSeeked).
  *
- * Rules this component follows (each one fixes a bug you hit):
- *  1. PLAY uses <video src=".../play">  -> never navigates, never downloads.
- *  2. DOWNLOAD is a separate <a href=".../download" download> button.
- *  3. video.play() is only called inside a tap/click handler.
- *  4. Starts muted (browsers allow muted playback), with an unmute button.
- *  5. play() errors are handled by name, so a valid link never shows a false "blocked".
+ * Also: a slow range fetch now shows a small "Buffering..." indicator
+ * instead of looking frozen, and a stuck buffer nudges itself after 4s
+ * (micro-seek) before giving up.
  */
 
-const API_BASE = ""; // e.g. "https://your-domain.com" if the API is on another origin
+const API_BASE = "";
 
 export default function VideoPlayer({ jobId }) {
   const videoRef = useRef(null);
+  const wasPlayingBeforeSeekRef = useRef(false);
+  const stallTimerRef = useRef(null);
+
   const [playing, setPlaying] = useState(false);
+  const [buffering, setBuffering] = useState(false);
   const [muted, setMuted] = useState(true);
   const [message, setMessage] = useState("");
   const [fatal, setFatal] = useState(false);
@@ -26,27 +29,27 @@ export default function VideoPlayer({ jobId }) {
   const playUrl = `${API_BASE}/api/media/${jobId}/play`;
   const downloadUrl = `${API_BASE}/api/media/${jobId}/download`;
 
-  // Clean up when the player unmounts or the job changes
   useEffect(() => {
     setPlaying(false);
+    setBuffering(false);
     setMessage("");
     setFatal(false);
     const v = videoRef.current;
     return () => {
+      clearTimeout(stallTimerRef.current);
       if (v) {
-        try {
-          v.pause();
-        } catch (e) {}
+        v.pause();
+        v.removeAttribute("src");
+        v.load();
       }
     };
   }, [jobId]);
 
-  // Called ONLY from a click/tap. No await before play().
   const handlePlayClick = async () => {
     const v = videoRef.current;
     if (!v) return;
     setMessage("");
-    v.muted = true; // muted playback is always allowed
+    v.muted = true;
     setMuted(true);
     try {
       await v.play();
@@ -59,16 +62,12 @@ export default function VideoPlayer({ jobId }) {
   const handlePlayError = (err) => {
     const name = err && err.name;
     if (name === "NotAllowedError") {
-      // Normal state: the user just needs to tap again. Not an error.
       setPlaying(false);
       setMessage("Tap the play button to start.");
     } else if (name === "NotSupportedError") {
       setFatal(true);
-      setMessage(
-        "This video format can't be played in your browser. You can still download it."
-      );
+      setMessage("This video format can't be played in your browser. You can still download it.");
     } else if (name === "AbortError") {
-      // Source reloaded while starting. Retry once.
       const v = videoRef.current;
       if (v) v.play().then(() => setPlaying(true)).catch(() => {});
     } else {
@@ -78,11 +77,41 @@ export default function VideoPlayer({ jobId }) {
     }
   };
 
-  // Errors that happen while loading / decoding
+  // --- the actual fix: remember + restore play state across a seek --------
+  const handleSeeking = () => {
+    const v = videoRef.current;
+    wasPlayingBeforeSeekRef.current = v ? !v.paused && !v.ended : false;
+    setBuffering(true);
+    clearTimeout(stallTimerRef.current);
+    stallTimerRef.current = setTimeout(() => {
+      const v2 = videoRef.current;
+      if (v2 && v2.readyState < 3) {
+        v2.currentTime = v2.currentTime + 0.01; // soft recovery nudge
+      }
+    }, 4000);
+  };
+
+  const handleSeeked = () => {
+    clearTimeout(stallTimerRef.current);
+    setBuffering(false);
+    const v = videoRef.current;
+    if (v && wasPlayingBeforeSeekRef.current && v.paused) {
+      v.play().then(() => setPlaying(true)).catch(handlePlayError);
+    }
+  };
+
+  const handleWaiting = () => setBuffering(true);
+  const handlePlaying = () => {
+    setBuffering(false);
+    setPlaying(true);
+  };
+
   const handleVideoError = () => {
     const v = videoRef.current;
     const code = v && v.error ? v.error.code : 0;
+    if (!code) return; // ignore spurious error events with no real MediaError
     setPlaying(false);
+    setBuffering(false);
     setFatal(true);
     if (code === 4) {
       setMessage("This video isn't available or its format isn't supported. Try downloading it.");
@@ -125,10 +154,14 @@ export default function VideoPlayer({ jobId }) {
           muted
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
+          onSeeking={handleSeeking}
+          onSeeked={handleSeeked}
+          onWaiting={handleWaiting}
+          onPlaying={handlePlaying}
           onError={handleVideoError}
         />
 
-        {!playing && !fatal && (
+        {!playing && !fatal && !buffering && (
           <button
             type="button"
             onClick={handlePlayClick}
@@ -140,32 +173,23 @@ export default function VideoPlayer({ jobId }) {
             </span>
           </button>
         )}
+
+        {buffering && !fatal && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
+            <span className="px-3 py-1 rounded bg-black/60 text-white text-xs">Buffering...</span>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-3 mt-3">
-        {/* Separate, always-available download. Never tied to playback. */}
-        <a
-          href={downloadUrl}
-          download
-          className="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition"
-        >
+        <a href={downloadUrl} download className="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium">
           Download
         </a>
-
-        <button
-          type="button"
-          onClick={toggleMute}
-          className="px-4 py-2 rounded-md border border-gray-400 text-sm hover:bg-gray-100 transition"
-        >
+        <button type="button" onClick={toggleMute} className="px-4 py-2 rounded-md border border-gray-400 text-sm">
           {muted ? "Unmute" : "Mute"}
         </button>
-
         {fatal && (
-          <button
-            type="button"
-            onClick={retry}
-            className="px-4 py-2 rounded-md border border-gray-400 text-sm hover:bg-gray-100 transition"
-          >
+          <button type="button" onClick={retry} className="px-4 py-2 rounded-md border border-gray-400 text-sm">
             Retry
           </button>
         )}
